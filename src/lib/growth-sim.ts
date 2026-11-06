@@ -69,7 +69,7 @@ function stepBuild(s: Sim) {
   const lift = 0.28;
   const pick: [number, number, number] = [FEED.x, FEED.y + BAR.H, FEED.z];
   const place: [number, number, number] = [target.x, ty, target.z];
-  const above = (p: number[], h: number): [number, number, number] => [p[0], p[1] + h, p[2]];
+  const above = (p: [number, number, number], h: number): [number, number, number] => [p[0], p[1] + h, p[2]];
   // keyframes along normalized cycle
   const keys: [number, [number, number, number], number, boolean][] = [
     [0.0, above(pick, lift), Math.PI / 2, false],
