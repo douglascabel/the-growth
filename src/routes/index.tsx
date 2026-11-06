@@ -1,23 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
+import GrowthScene from "@/components/GrowthScene";
 
-// The home route ships no og:image, so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  ssr: false,
+  head: () => ({
+    meta: [
+      { title: "The Growth — Filipe Vilas-Boas & Douglas Cabel" },
+      { name: "description", content: "3D prototype of The Growth: a robot arm endlessly stacks gold bars until the tower falls." },
+      { property: "og:title", content: "The Growth — robotic sculpture" },
+      { property: "og:description", content: "A robot stacks gold bars, the tower falls, it starts again. A loop on the myth of infinite growth." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
+    <main className="relative h-screen w-screen overflow-hidden bg-background">
+      <GrowthScene />
+      <div className="pointer-events-none absolute left-6 top-6 text-foreground">
+        <h1 className="font-serif text-3xl tracking-tight">The Growth</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Filipe Vilas-Boas &amp; Douglas Cabel</p>
+      </div>
+      <p className="pointer-events-none absolute bottom-5 left-6 text-xs text-muted-foreground">
+        Drag to orbit · scroll or pinch to zoom
+      </p>
+    </main>
   );
 }
