@@ -35,7 +35,9 @@ const dark = new THREE.MeshStandardMaterial({ color: "#222326", metalness: 0.6, 
 
 function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
   const obj = useLoader(OBJLoader, robotObj.url);
-  const [map, normalMap, roughnessMap] = useTexture([colorTex.url, normalTex.url, roughTex.url]);
+  const [map, normalMap, roughnessMap] = useTexture([colorTex.url, normalTex.url, roughTex.url]) as [
+    THREE.Texture, THREE.Texture, THREE.Texture,
+  ];
   const parts = useMemo(() => {
     map.colorSpace = THREE.SRGBColorSpace;
     for (const t of [map, normalMap, roughnessMap]) t.anisotropy = 8;
