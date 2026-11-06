@@ -165,7 +165,7 @@ export const RIG = {
   elbow: [-0.125, 1.63, 0.99] as [number, number, number],
   wrist: [-0.125, 1.66, -0.75] as [number, number, number],
   roll: [-0.125, 1.43, -0.75] as [number, number, number],
-  toolDrop: 0.37, // wrist pivot -> point between finger tips
+  toolDrop: 0.392, // wrist pivot -> point between finger tips
 };
 const S_F = -RIG.shoulder[2], S_Y = RIG.shoulder[1];
 const E_F = -RIG.elbow[2], E_Y = RIG.elbow[1];

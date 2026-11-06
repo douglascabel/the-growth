@@ -1,8 +1,13 @@
-import { Canvas, useFrame } from "@react-three/fiber";
-import { ContactShadows, Environment, Lightformer, OrbitControls, RoundedBox } from "@react-three/drei";
-import { useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useLoader } from "@react-three/fiber";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import robotObj from "@/assets/industrial_robot_arm.obj.asset.json";
+import colorTex from "@/assets/robot_arm_color.jpg.asset.json";
+import normalTex from "@/assets/robot_arm_normal.jpg.asset.json";
+import roughTex from "@/assets/robot_arm_roughness.jpg.asset.json";
+import { ContactShadows, Environment, useTexture, Lightformer, OrbitControls, RoundedBox } from "@react-three/drei";
+import { Suspense, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { ARM, BAR, FEED, MAX_BARS, PED, ROBOT_BASE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
+import { RIG, BAR, FEED, MAX_BARS, PED, ROBOT_BASE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
 
 const KUKA_ORANGE = "#f26a10";
 
@@ -32,75 +37,60 @@ const dark = new THREE.MeshStandardMaterial({ color: "#222326", metalness: 0.6, 
 const steel = new THREE.MeshStandardMaterial({ color: "#b9bcc0", metalness: 1, roughness: 0.25 });
 
 function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
+  const obj = useLoader(OBJLoader, robotObj.url);
+  const [map, normalMap, roughnessMap] = useTexture([colorTex.url, normalTex.url, roughTex.url]);
+  const parts = useMemo(() => {
+    map.colorSpace = THREE.SRGBColorSpace;
+    for (const t of [map, normalMap, roughnessMap]) t.anisotropy = 8;
+    const mat = new THREE.MeshPhysicalMaterial({
+      map, normalMap, roughnessMap, roughness: 1, metalness: 0.2, clearcoat: 0.35, clearcoatRoughness: 0.3,
+    });
+    const out: Record<string, THREE.Mesh> = {};
+    obj.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) {
+        const m = (o as THREE.Mesh).clone();
+        m.material = mat; m.castShadow = true; m.receiveShadow = true;
+        out[o.name] = m;
+      }
+    });
+    return out;
+  }, [obj, map, normalMap, roughnessMap]);
   const base = useRef<THREE.Group>(null!);
   const sh = useRef<THREE.Group>(null!);
   const el = useRef<THREE.Group>(null!);
   const wr = useRef<THREE.Group>(null!);
   const roll = useRef<THREE.Group>(null!);
-  const fingers = useRef<THREE.Group[]>([]);
+  const f1 = useRef<THREE.Group>(null!);
+  const f2 = useRef<THREE.Group>(null!);
   useFrame(() => {
-    const ik = solveIK(sim.tool);
+    const ik = solveIK(sim.tool, sim.toolYaw);
     base.current.rotation.y = ik.yaw;
-    sh.current.rotation.z = ik.a;
-    el.current.rotation.z = ik.b;
-    wr.current.rotation.z = ik.c;
-    roll.current.rotation.x = -(sim.toolYaw - ik.yaw);
-    const open = sim.carry ? 0.028 : 0.05;
-    fingers.current.forEach((f, i) => f && (f.position.z = (i ? 1 : -1) * open));
+    sh.current.rotation.x = ik.shoulder;
+    el.current.rotation.x = ik.elbow;
+    wr.current.rotation.x = ik.wrist;
+    roll.current.rotation.y = ik.roll;
+    const close = sim.carry ? 0.01 : 0;
+    f1.current.position.x = close;
+    f2.current.position.x = -close;
   });
+  const sub = (a: number[], b: number[]) => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!] as [number, number, number];
+  const neg = (a: number[]) => [-a[0]!, -a[1]!, -a[2]!] as [number, number, number];
+  const P = (name: string, pivot: number[]) => parts[name] && <primitive object={parts[name]} position={neg(pivot)} />;
   return (
     <group position={[ROBOT_BASE.x, 0, ROBOT_BASE.z]}>
-      {/* foot */}
-      <mesh material={dark} castShadow receiveShadow position={[0, 0.06, 0]}>
-        <boxGeometry args={[0.95, 0.12, 0.95]} />
-      </mesh>
-      <mesh material={orange} castShadow position={[0, 0.2, 0]}>
-        <cylinderGeometry args={[0.38, 0.44, 0.18, 48]} />
-      </mesh>
-      <group ref={base} position={[0, 0.29, 0]}>
-        {/* rotating column */}
-        <mesh material={orange} castShadow position={[0.1, 0.22, 0]}>
-          <cylinderGeometry args={[0.34, 0.36, 0.44, 48]} />
-        </mesh>
-        <RoundedBox args={[0.55, 0.42, 0.62]} radius={0.06} material={orange} castShadow position={[ARM.a1 - 0.08, ARM.h0 - 0.29 - 0.1, 0]} />
-        {/* counterbalance */}
-        <mesh material={dark} castShadow position={[-0.22, 0.55, 0.36]} rotation={[0, 0, 0.5]}>
-          <cylinderGeometry args={[0.07, 0.07, 0.65, 24]} />
-        </mesh>
-        <group ref={sh} position={[ARM.a1, ARM.h0 - 0.29, 0]}>
-          <mesh material={dark} castShadow rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[0.24, 0.24, 0.72, 48]} />
-          </mesh>
-          <RoundedBox args={[ARM.L1, 0.3, 0.34]} radius={0.08} material={orange} castShadow position={[ARM.L1 / 2, 0, 0.12]} />
-          <group ref={el} position={[ARM.L1, 0, 0]}>
-            <mesh material={orange} castShadow rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.22, 0.22, 0.56, 48]} />
-            </mesh>
-            <RoundedBox args={[0.5, 0.36, 0.42]} radius={0.08} material={orange} castShadow position={[-0.12, 0.06, -0.08]} />
-            <mesh material={orange} castShadow position={[ARM.L2 / 2 + 0.05, 0, -0.08]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.1, 0.15, ARM.L2 - 0.2, 32]} />
-            </mesh>
-            <mesh material={dark} castShadow position={[-0.25, 0.06, -0.08]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.13, 0.13, 0.2, 32]} />
-            </mesh>
-            <group ref={wr} position={[ARM.L2, 0, -0.08]}>
-              <mesh material={orange} castShadow rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.09, 0.09, 0.22, 32]} />
-              </mesh>
+      <group position={neg(RIG.yaw)}>{P("robot_arm_base", [0, 0, 0])}</group>
+      <group ref={base}>
+        {P("robot_arm", RIG.yaw)}
+        <group ref={sh} position={sub(RIG.shoulder, RIG.yaw)}>
+          {P("robot_arm_large", RIG.shoulder)}
+          <group ref={el} position={sub(RIG.elbow, RIG.shoulder)}>
+            {P("Robot_arm_2", RIG.elbow)}
+            <group ref={wr} position={sub(RIG.wrist, RIG.elbow)}>
               <group ref={roll}>
-                <mesh material={dark} castShadow position={[0.1, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-                  <cylinderGeometry args={[0.06, 0.06, 0.08, 32]} />
-                </mesh>
-                <mesh material={steel} castShadow position={[0.2, 0, 0]}>
-                  <boxGeometry args={[0.07, 0.07, 0.16]} />
-                </mesh>
-                {[0, 1].map((i) => (
-                  <group key={i} ref={(g) => { if (g) fingers.current[i] = g; }} position={[0.27, 0, 0]}>
-                    <mesh material={steel} castShadow>
-                      <boxGeometry args={[0.09, 0.05, 0.012]} />
-                    </mesh>
-                  </group>
-                ))}
+                {P("robot_arm_end", RIG.wrist)}
+                {P("Grabber", RIG.wrist)}
+                <group ref={f1}>{P("Grabber_hand_1", RIG.wrist)}</group>
+                <group ref={f2}>{P("Grabber_hand_2", RIG.wrist)}</group>
               </group>
             </group>
           </group>
@@ -191,7 +181,9 @@ function World() {
         ))}
       </group>
 
-      <Robot sim={sim} />
+      <Suspense fallback={null}>
+        <Robot sim={sim} />
+      </Suspense>
       <Bars sim={sim} />
 
       <OrbitControls
