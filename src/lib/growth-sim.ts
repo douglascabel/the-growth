@@ -155,15 +155,41 @@ export function stepSim(s: Sim, dtRaw: number) {
   }
 }
 
-/** Analytic IK: returns joint angles for a downward-pointing tool tip at P. */
-export function solveIK(P: [number, number, number]) {
+/**
+ * Joint pivots of the uploaded "Industrial robot arm" OBJ, in model space
+ * (meters, Y up, arm reaching toward -Z, yaw axis at x = -0.05).
+ */
+export const RIG = {
+  yaw: [-0.05, 0, 0] as [number, number, number],
+  shoulder: [-0.125, 0.74, 0.203] as [number, number, number],
+  elbow: [-0.125, 1.63, 0.99] as [number, number, number],
+  wrist: [-0.125, 1.66, -0.75] as [number, number, number],
+  roll: [-0.125, 1.43, -0.75] as [number, number, number],
+  toolDrop: 0.37, // wrist pivot -> point between finger tips
+};
+const S_F = -RIG.shoulder[2], S_Y = RIG.shoulder[1];
+const E_F = -RIG.elbow[2], E_Y = RIG.elbow[1];
+const W_F = -RIG.wrist[2], W_Y = RIG.wrist[1];
+const L1 = Math.hypot(E_F - S_F, E_Y - S_Y);
+const L2 = Math.hypot(W_F - E_F, W_Y - E_Y);
+const A0 = Math.atan2(E_Y - S_Y, E_F - S_F); // rest upper-arm angle
+const F0 = Math.atan2(W_Y - E_Y, W_F - E_F); // rest forearm angle
+const LAT = RIG.shoulder[0] - RIG.yaw[0]; // arm plane offset from yaw axis
+
+/** Analytic IK for a downward-pointing gripper at P; returns rotation deltas from the rest pose. */
+export function solveIK(P: [number, number, number], toolYaw: number) {
   const dx = P[0] - ROBOT_BASE.x, dz = P[2] - ROBOT_BASE.z;
-  const yaw = Math.atan2(-dz, dx);
-  const r = Math.hypot(dx, dz) - ARM.a1;
-  const h = P[1] + ARM.T - ARM.h0;
-  const D = Math.min(Math.hypot(r, h), ARM.L1 + ARM.L2 - 1e-3);
-  const a = Math.atan2(h, r) + Math.acos((ARM.L1 ** 2 + D ** 2 - ARM.L2 ** 2) / (2 * ARM.L1 * D));
-  const b = -(Math.PI - Math.acos((ARM.L1 ** 2 + ARM.L2 ** 2 - D ** 2) / (2 * ARM.L1 * ARM.L2)));
-  const c = -Math.PI / 2 - a - b;
-  return { yaw, a, b, c };
+  const R = Math.max(Math.hypot(dx, dz), Math.abs(LAT) + 1e-3);
+  const fwd = Math.sqrt(R * R - LAT * LAT);
+  const yaw = Math.atan2(dx, dz) - Math.atan2(LAT, -fwd);
+  const r = fwd - S_F;
+  const h = P[1] + RIG.toolDrop - S_Y;
+  const D = Math.min(Math.max(Math.hypot(r, h), Math.abs(L2 - L1) + 1e-3), L1 + L2 - 1e-3);
+  const a = Math.atan2(h, r) + Math.acos((L1 ** 2 + D ** 2 - L2 ** 2) / (2 * L1 * D));
+  const b = -(Math.PI - Math.acos((L1 ** 2 + L2 ** 2 - D ** 2) / (2 * L1 * L2)));
+  const shoulder = a - A0;
+  const elbow = b + A0 - F0;
+  const wrist = -(a + b - F0);
+  const roll = toolYaw - yaw + Math.PI / 2;
+  return { yaw, shoulder, elbow, wrist, roll };
 }
