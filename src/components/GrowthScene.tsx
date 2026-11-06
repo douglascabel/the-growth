@@ -9,7 +9,6 @@ import { Suspense, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { RIG, BAR, FEED, MAX_BARS, PED, ROBOT_BASE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
 
-const KUKA_ORANGE = "#f26a10";
 
 function useConcreteTexture() {
   return useMemo(() => {
@@ -32,9 +31,7 @@ function useConcreteTexture() {
 }
 
 const gold = new THREE.MeshPhysicalMaterial({ color: "#e8b54a", metalness: 1, roughness: 0.18, clearcoat: 0.3 });
-const orange = new THREE.MeshPhysicalMaterial({ color: KUKA_ORANGE, metalness: 0.15, roughness: 0.38, clearcoat: 0.6, clearcoatRoughness: 0.25 });
 const dark = new THREE.MeshStandardMaterial({ color: "#222326", metalness: 0.6, roughness: 0.45 });
-const steel = new THREE.MeshStandardMaterial({ color: "#b9bcc0", metalness: 1, roughness: 0.25 });
 
 function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
   const obj = useLoader(OBJLoader, robotObj.url);
