@@ -64,7 +64,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 function stepBuild(s: Sim) {
   const i = s.placed;
   const k = s.phaseT / CYCLE;
-  const target = s.plan[i];
+  const target = s.plan[i]!;
   const ty = PED.H + i * BAR.H + BAR.H;
   const lift = 0.28;
   const pick: [number, number, number] = [FEED.x, FEED.y + BAR.H, FEED.z];
@@ -82,14 +82,14 @@ function stepBuild(s: Sim) {
     [1.0, above(pick, lift), Math.PI / 2, false],
   ];
   let j = 0;
-  while (j < keys.length - 2 && k > keys[j + 1][0]) j++;
-  const [k0, p0, y0, c0] = keys[j];
-  const [k1, p1, y1] = keys[j + 1];
+  while (j < keys.length - 2 && k > keys[j + 1]![0]) j++;
+  const [k0, p0, y0, c0] = keys[j]!;
+  const [k1, p1, y1] = keys[j + 1]!;
   const u = ss((k - k0) / (k1 - k0));
   s.tool = [lerp(p0[0], p1[0], u), lerp(p0[1], p1[1], u), lerp(p0[2], p1[2], u)];
   s.toolYaw = lerp(y0, y1, u);
   s.carry = c0;
-  const bar = s.bars[i];
+  const bar = s.bars[i]!;
   if (s.carry) {
     bar.visible = true;
     bar.p = [s.tool[0], s.tool[1] - BAR.H / 2, s.tool[2]];
@@ -106,11 +106,11 @@ function stepBuild(s: Sim) {
 }
 
 function startCollapse(s: Sim) {
-  const last = s.plan[s.placed - 1];
+  const last = s.plan[s.placed - 1]!;
   const len = Math.hypot(last.x, last.z) || 1;
   const dx = last.x / len, dz = last.z / len;
   for (let i = 0; i < s.placed; i++) {
-    const b = s.bars[i];
+    const b = s.bars[i]!;
     const h = (i + 0.5) * BAR.H;
     const sp = h * 4 + rand(0, 0.15);
     b.v = [dx * sp + rand(-0.1, 0.1), rand(-0.05, 0.1), dz * sp + rand(-0.1, 0.1)];
@@ -120,7 +120,7 @@ function startCollapse(s: Sim) {
 
 function stepCollapse(s: Sim, dt: number) {
   for (let i = 0; i < s.placed; i++) {
-    const b = s.bars[i];
+    const b = s.bars[i]!;
     // delay lower bars a little: the tower peels from the top
     const delay = (1 - i / s.placed) * 0.25;
     if (s.phaseT < delay) continue;
