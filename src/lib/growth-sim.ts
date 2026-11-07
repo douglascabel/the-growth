@@ -44,9 +44,9 @@ function animate(s:Sim, keys:Key[], k:number) {
   s.toolYaw=mix(from[2],to[2],u);s.carry=from[3];
 }
 function seat(b:Bar,p:Placement) {
-  b.p=[p.x,(p.layer+.5)*BAR.H,p.z]; b.yaw=p.yaw;b.layer=p.layer;b.slot=p.slot;b.visible=true;b.pitch=0;b.roll=0;b.q=undefined;
+  b.p=[p.x,(p.layer+.5)*BAR.H,p.z]; b.yaw=p.yaw;b.layer=p.layer;b.slot=p.slot;b.visible=true;b.pitch=0;b.roll=0;delete b.q;
 }
-function follow(s:Sim,b:Bar) {b.visible=true;b.p=[s.tool[0],s.tool[1]-BAR.H/2,s.tool[2]];b.yaw=s.toolYaw;b.pitch=0;b.roll=0;b.q=undefined;}
+function follow(s:Sim,b:Bar) {b.visible=true;b.p=[s.tool[0],s.tool[1]-BAR.H/2,s.tool[2]];b.yaw=s.toolYaw;b.pitch=0;b.roll=0;delete b.q;}
 function stepBuild(s:Sim) {
   const p=s.plan[s.placed], b=s.bars[s.placed]; if(!p||!b)return;
   s.active=s.placed; const k=s.phaseT/CYCLE;
@@ -78,7 +78,7 @@ function stepRemove(s:Sim) {
   animate(s,[[0,[pick[0],pick[1]+.18,pick[2]],source.yaw,false],[.16,pick,source.yaw,false],[.22,pick,source.yaw,true],[.43,extract,source.yaw,true],[.56,high,source.yaw,true],[.72,[place[0],high[1],place[2]],dest.yaw,true],[.82,place,dest.yaw,true],[.88,place,dest.yaw,false],[1,[place[0],place[1]+.2,place[2]],dest.yaw,false]],k);
   if(k>=.22 && k<.88){s.carry=true;follow(s,b);}
   if(k>=.88)seat(b,dest);
-  if(s.phaseT>=REMOVE_CYCLE){seat(b,dest);s.moves++;s.phaseT=0;s.active=-1;s.destination=undefined;}
+  if(s.phaseT>=REMOVE_CYCLE){seat(b,dest);s.moves++;s.phaseT=0;s.active=-1;delete s.destination;}
 }
 export function stepSim(s:Sim,dtRaw:number) {
   const dt=Math.max(0,Math.min(dtRaw,.05));s.t+=dt;s.phaseT+=dt;
