@@ -19,7 +19,7 @@ export async function createDynamics(): Promise<Dynamics> {
       let body=bodies.get(i);
       if(!body){
         body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation({x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.3).setAngularDamping(.4).setCcdEnabled(true));
-        world.createCollider(RAPIER.ColliderDesc.cuboid(BAR.L/2,BAR.H/2,BAR.W/2).setContactSkin(0).setDensity(1000).setFriction(.55).setRestitution(.02),body);bodies.set(i,body);
+        world.createCollider(RAPIER.ColliderDesc.cuboid(BAR.L/2,BAR.H/2,BAR.W/2).setContactSkin(0).setDensity(1000).setFriction(.55).setRestitution(.02),body);body.sleep();bodies.set(i,body);
       }
       const moving=s.active===i && s.carry;
       if(moving){body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);body.setNextKinematicTranslation({x:b.p[0],y:b.p[1],z:b.p[2]});body.setNextKinematicRotation({x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)});}
