@@ -1,4 +1,4 @@
-import { Canvas, useFrame, useLoader } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import lingotAsset from "@/assets/gold-filipe-light.stl.asset.json";
@@ -175,6 +175,12 @@ function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
 function World() {
   const floorTex = useConcreteTexture();
   const sim = useMemo(() => createSim(), []);
+  const { camera, size } = useThree();
+  useEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    camera.fov = size.width < 600 ? 52 : 42;
+    camera.updateProjectionMatrix();
+  }, [camera, size.width]);
   return (
     <>
       <color attach="background" args={["#e8eae6"]} />
