@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import lingotAsset from "@/assets/gold-filipe-web.stl.asset.json";
+import lingotAsset from "@/assets/gold-filipe-light.stl.asset.json";
 import robotObj from "@/assets/industrial_robot_arm.obj.asset.json";
 import colorTex from "@/assets/robot_arm_color.jpg.asset.json";
 import normalTex from "@/assets/robot_arm_normal.jpg.asset.json";
