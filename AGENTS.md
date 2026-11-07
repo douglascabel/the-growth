@@ -28,3 +28,8 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Scene architecture
+- Keep placement and robot scaling in the pure growth-sim module so IK and rendering use the same coordinate transform.
+- Normalize a cloned supplied STL once to BAR dimensions and share it through instancing for tower and feeder bars to avoid redundant geometry and draw calls.
+- Development-only window.__growth exposes state and sim(seconds); #growth[data-scene-ready] is set after loaded artwork draws, enabling reproducible scene checks.

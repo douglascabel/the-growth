@@ -1,20 +1,23 @@
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import lingotAsset from "@/assets/gold-filipe-web.stl.asset.json";
 import robotObj from "@/assets/industrial_robot_arm.obj.asset.json";
 import colorTex from "@/assets/robot_arm_color.jpg.asset.json";
 import normalTex from "@/assets/robot_arm_normal.jpg.asset.json";
 import roughTex from "@/assets/robot_arm_roughness.jpg.asset.json";
 import { ContactShadows, Environment, useTexture, Lightformer, OrbitControls, RoundedBox } from "@react-three/drei";
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { RIG, BAR, FEED, MAX_BARS, PED, ROBOT_BASE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
+import { RIG, BAR, FEED, MAX_BARS, PED, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
 
 
 function useConcreteTexture() {
   return useMemo(() => {
     const c = document.createElement("canvas");
     c.width = c.height = 512;
-    const g = c.getContext("2d")!;
+    const g = c.getContext("2d");
+    if (!g) return new THREE.Texture();
     g.fillStyle = "#8c8a86";
     g.fillRect(0, 0, 512, 512);
     for (let i = 0; i < 18000; i++) {
@@ -36,8 +39,9 @@ const dark = new THREE.MeshStandardMaterial({ color: "#222326", metalness: 0.6, 
 function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
   const obj = useLoader(OBJLoader, robotObj.url);
   const tex = useTexture([colorTex.url, normalTex.url, roughTex.url]) as unknown as THREE.Texture[];
-  const map = tex[0]!, normalMap = tex[1]!, roughnessMap = tex[2]!;
+  const [map, normalMap, roughnessMap] = tex;
   const parts = useMemo(() => {
+    if (!map || !normalMap || !roughnessMap) return {};
     map.colorSpace = THREE.SRGBColorSpace;
     for (const t of [map, normalMap, roughnessMap]) t.anisotropy = 8;
     const mat = new THREE.MeshPhysicalMaterial({
@@ -53,14 +57,15 @@ function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
     });
     return out;
   }, [obj, map, normalMap, roughnessMap]);
-  const base = useRef<THREE.Group>(null!);
-  const sh = useRef<THREE.Group>(null!);
-  const el = useRef<THREE.Group>(null!);
-  const wr = useRef<THREE.Group>(null!);
-  const roll = useRef<THREE.Group>(null!);
-  const f1 = useRef<THREE.Group>(null!);
-  const f2 = useRef<THREE.Group>(null!);
+  const base = useRef<THREE.Group>(null);
+  const sh = useRef<THREE.Group>(null);
+  const el = useRef<THREE.Group>(null);
+  const wr = useRef<THREE.Group>(null);
+  const roll = useRef<THREE.Group>(null);
+  const f1 = useRef<THREE.Group>(null);
+  const f2 = useRef<THREE.Group>(null);
   useFrame(() => {
+    if (!base.current || !sh.current || !el.current || !wr.current || !roll.current || !f1.current || !f2.current) return;
     const ik = solveIK(sim.tool, sim.toolYaw);
     base.current.rotation.y = ik.yaw;
     sh.current.rotation.x = ik.shoulder;
@@ -71,11 +76,11 @@ function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
     f1.current.position.x = close;
     f2.current.position.x = -close;
   });
-  const sub = (a: number[], b: number[]) => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!] as [number, number, number];
-  const neg = (a: number[]) => [-a[0]!, -a[1]!, -a[2]!] as [number, number, number];
-  const P = (name: string, pivot: number[]) => parts[name] && <primitive object={parts[name]} position={neg(pivot)} />;
+  const sub = (a: [number, number, number], b: [number, number, number]): [number, number, number] => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const neg = (a: [number, number, number]): [number, number, number] => [-a[0], -a[1], -a[2]];
+  const P = (name: string, pivot: [number, number, number]) => parts[name] && <primitive object={parts[name]} position={neg(pivot)} />;
   return (
-    <group position={[ROBOT_BASE.x, 0, ROBOT_BASE.z]}>
+    <group position={[ROBOT_BASE.x, ROBOT_BASE.y, ROBOT_BASE.z]} scale={ROBOT_SCALE}>
       <group position={neg(RIG.yaw)}>{P("robot_arm_base", [0, 0, 0])}</group>
       <group ref={base}>
         {P("robot_arm", RIG.yaw)}
@@ -99,47 +104,69 @@ function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
 }
 
 function Bars({ sim }: { sim: ReturnType<typeof createSim> }) {
-  const refs = useRef<THREE.Mesh[]>([]);
-  const tower = useRef<THREE.Group>(null!);
+  const source = useLoader(STLLoader, lingotAsset.url);
+  const geometry = useMemo(() => {
+    const g = source.clone();
+    g.computeBoundingBox();
+    const bounds = g.boundingBox;
+    if (!bounds) return g;
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    g.translate(-center.x, -center.y, -center.z);
+    g.scale(BAR.L / size.x, BAR.H / size.y, BAR.W / size.z);
+    g.computeVertexNormals();
+    return g;
+  }, [source]);
+  const instances = useRef<THREE.InstancedMesh>(null);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  useEffect(() => () => geometry.dispose(), [geometry]);
   useFrame(() => {
-    const sway = sim.phase === "build" ? sim.sway : 0;
-    tower.current.rotation.x = Math.sin(sim.t * 1.3) * sway;
-    tower.current.rotation.z = Math.cos(sim.t * 1.1) * sway;
+    const mesh = instances.current;
+    if (!mesh) return;
     sim.bars.forEach((b, i) => {
-      const m = refs.current[i];
-      if (!m) return;
-      m.visible = b.visible;
-      m.position.set(b.p[0], b.p[1] - PED.H, b.p[2]);
-      m.rotation.set(b.pitch, b.yaw, b.roll);
+      dummy.position.set(...b.p);
+      dummy.rotation.set(b.pitch, b.yaw, b.roll);
+      dummy.scale.setScalar(b.visible ? 1 : 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
     });
+    for (let i = 0; i < 5; i++) {
+      dummy.position.set(FEED.x, FEED.y - (4 - i) * BAR.H - BAR.H / 2, FEED.z);
+      dummy.rotation.set(0, Math.PI / 2, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(MAX_BARS + i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
   });
   return (
-    <group ref={tower} position={[0, PED.H, 0]}>
-      {Array.from({ length: MAX_BARS }, (_, i) => (
-        <mesh key={i} ref={(m) => { if (m) refs.current[i] = m; }} material={gold} castShadow receiveShadow visible={false}>
-          <boxGeometry args={[BAR.L, BAR.H, BAR.W]} />
-        </mesh>
-      ))}
-    </group>
+    <instancedMesh ref={instances} args={[geometry, gold, MAX_BARS + 5]} castShadow receiveShadow frustumCulled={false} />
   );
 }
 
-function Stepper({ sim, onReady }: { sim: ReturnType<typeof createSim>; onReady: () => void }) {
+function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
   const n = useRef(0);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const debug = {
+      state: sim,
+      sim: (seconds: number) => { for (let i = 0; i < seconds * 60; i++) stepSim(sim, 1 / 60); },
+    };
+    Object.assign(window, { __growth: debug });
+    return () => { Reflect.deleteProperty(window, "__growth"); };
+  }, [sim]);
   useFrame((_, d) => {
     stepSim(sim, d);
-    if (++n.current === 3) onReady();
-  });
+    if (++n.current === 3) document.querySelector("#growth")?.setAttribute("data-scene-ready", "1");
+  }, -1);
   return null;
 }
 
 function World() {
   const floorTex = useConcreteTexture();
   const sim = useMemo(() => createSim(), []);
-  const [, setReady] = useState(false);
   return (
     <>
-      <Stepper sim={sim} onReady={() => { document.querySelector("#growth")?.setAttribute("data-scene-ready", "1"); setReady(true); }} />
       <color attach="background" args={["#d9d6d0"]} />
       <fog attach="fog" args={["#d9d6d0", 9, 22]} />
       <ambientLight intensity={0.15} />
@@ -172,20 +199,16 @@ function World() {
         <mesh material={dark} castShadow receiveShadow position={[0, (FEED.y - 0.06) / 2, 0]}>
           <boxGeometry args={[0.45, FEED.y - 0.06, 0.35]} />
         </mesh>
-        {Array.from({ length: 5 }, (_, i) => (
-          <mesh key={i} material={gold} castShadow position={[0, FEED.y - 0.06 + (i + 0.5) * 0.012, 0]} rotation-y={Math.PI / 2}>
-            <boxGeometry args={[BAR.L, BAR.H, BAR.W]} />
-          </mesh>
-        ))}
       </group>
 
       <Suspense fallback={null}>
         <Robot sim={sim} />
+        <Bars sim={sim} />
+        <Stepper sim={sim} />
       </Suspense>
-      <Bars sim={sim} />
 
       <OrbitControls
-        target={[-0.6, 1.0, 0.2]} enableDamping dampingFactor={0.08}
+        target={[0, 1.2, 0.2]} enableDamping dampingFactor={0.08}
         minDistance={0.6} maxDistance={12} maxPolarAngle={Math.PI / 2 - 0.03}
         autoRotate autoRotateSpeed={0.35}
       />

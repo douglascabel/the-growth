@@ -3,8 +3,10 @@
 
 export const BAR = { L: 0.15, W: 0.05, H: 0.01 };
 export const PED = { S: 1.2, H: 1.0 };
-export const ROBOT_BASE = { x: -1.9, z: 0 };
-export const FEED = { x: -1.9, y: 0.82, z: 1.35 }; // top of feeder tray stack
+export const ROBOT_SCALE = 0.55;
+export const ROBOT_BASE = { x: -0.22, y: PED.H + 0.003181 * ROBOT_SCALE, z: -0.17 };
+export const TOWER = { x: 0.32, z: 0.32 };
+export const FEED = { x: -0.22, y: 1.15, z: 0.9 }; // top of feeder tray stack
 export const ARM = { a1: 0.33, h0: 0.78, L1: 1.25, L2: 1.35, T: 0.32 };
 export const MAX_BARS = 44;
 export const CYCLE = 1.7; // seconds per bar
@@ -36,7 +38,7 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 function makePlan() {
   const dir = Math.random() * Math.PI * 2;
-  let x = 0, z = 0;
+  let x = TOWER.x, z = TOWER.z;
   const plan = [];
   for (let i = 0; i < MAX_BARS; i++) {
     const drift = 0.0006 + i * 0.00009;
@@ -64,7 +66,8 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 function stepBuild(s: Sim) {
   const i = s.placed;
   const k = s.phaseT / CYCLE;
-  const target = s.plan[i]!;
+   const target = s.plan[i];
+   if (!target) return;
   const ty = PED.H + i * BAR.H + BAR.H;
   const lift = 0.28;
   const pick: [number, number, number] = [FEED.x, FEED.y + BAR.H, FEED.z];
@@ -95,6 +98,11 @@ function stepBuild(s: Sim) {
     bar.p = [s.tool[0], s.tool[1] - BAR.H / 2, s.tool[2]];
     bar.yaw = s.toolYaw; bar.pitch = 0; bar.roll = 0;
   }
+  if (k >= 0.82) {
+    bar.visible = true;
+    bar.p = [target.x, ty - BAR.H / 2, target.z];
+    bar.yaw = target.yaw;
+  }
   if (s.phaseT >= CYCLE) {
     bar.p = [target.x, ty - BAR.H / 2, target.z];
     bar.yaw = target.yaw;
@@ -107,8 +115,8 @@ function stepBuild(s: Sim) {
 
 function startCollapse(s: Sim) {
   const last = s.plan[s.placed - 1]!;
-  const len = Math.hypot(last.x, last.z) || 1;
-  const dx = last.x / len, dz = last.z / len;
+  const len = Math.hypot(last.x - TOWER.x, last.z - TOWER.z) || 1;
+  const dx = (last.x - TOWER.x) / len, dz = (last.z - TOWER.z) / len;
   for (let i = 0; i < s.placed; i++) {
     const b = s.bars[i]!;
     const h = (i + 0.5) * BAR.H;
@@ -178,12 +186,12 @@ const LAT = RIG.shoulder[0] - RIG.yaw[0]; // arm plane offset from yaw axis
 
 /** Analytic IK for a downward-pointing gripper at P; returns rotation deltas from the rest pose. */
 export function solveIK(P: [number, number, number], toolYaw: number) {
-  const dx = P[0] - ROBOT_BASE.x, dz = P[2] - ROBOT_BASE.z;
+  const dx = (P[0] - ROBOT_BASE.x) / ROBOT_SCALE, dz = (P[2] - ROBOT_BASE.z) / ROBOT_SCALE;
   const R = Math.max(Math.hypot(dx, dz), Math.abs(LAT) + 1e-3);
   const fwd = Math.sqrt(R * R - LAT * LAT);
   const yaw = Math.atan2(dx, dz) - Math.atan2(LAT, -fwd);
   const r = fwd - S_F;
-  const h = P[1] + RIG.toolDrop - S_Y;
+  const h = (P[1] - ROBOT_BASE.y) / ROBOT_SCALE + RIG.toolDrop - S_Y;
   const D = Math.min(Math.max(Math.hypot(r, h), Math.abs(L2 - L1) + 1e-3), L1 + L2 - 1e-3);
   const a = Math.atan2(h, r) + Math.acos((L1 ** 2 + D ** 2 - L2 ** 2) / (2 * L1 * D));
   const b = -(Math.PI - Math.acos((L1 ** 2 + L2 ** 2 - D ** 2) / (2 * L1 * L2)));
