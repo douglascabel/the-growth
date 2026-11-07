@@ -1,5 +1,5 @@
 # Floor-level gallery sculpture
-- [ ] Check lingot dimensions and repair the robot's base rotation alignment.
-- [ ] Build Jenga layers and randomly remove eligible bars until collapse.
-- [ ] Remove pedestals and recreate the reference room ambiance.
-- [ ] Test construction/deconstruction and render desktop/mobile; do not publish.
+- [x] Correct lingot orientation and retain 15 × 5 × 1 cm; verify the shared base axis and floor contact in rendered views.
+- [x] Build Jenga layers and randomly remove eligible bars until physical collapse.
+- [x] Remove pedestals and recreate the reference room ambiance.
+- [x] Pass eight tests and render desktop/mobile, including orbit and zoom; not published.
