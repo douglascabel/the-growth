@@ -178,14 +178,14 @@ function World() {
   const { camera, size } = useThree();
   useEffect(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
-    camera.fov = size.width < 600 ? 52 : 42;
+    camera.fov = size.width < 600 ? 60 : 50;
     camera.updateProjectionMatrix();
   }, [camera, size.width]);
   return (
     <>
       <color attach="background" args={["#e8eae6"]} />
       <fog attach="fog" args={["#e8eae6", 15, 35]} />
-      <GalleryRoom />
+      <group scale={0.65}><GalleryRoom /></group>
       <ambientLight intensity={0.5} />
       <directionalLight
         position={[3, 7, -4]} intensity={2.2} castShadow
@@ -213,7 +213,7 @@ function World() {
       </Suspense>
 
       <OrbitControls
-        target={[0, 0.38, 0.15]} enableDamping dampingFactor={0.08}
+        target={[0, 0.75, 0.15]} enableDamping dampingFactor={0.08}
         minDistance={0.6} maxDistance={12} maxPolarAngle={Math.PI / 2 - 0.03}
         autoRotate autoRotateSpeed={0.35}
       />

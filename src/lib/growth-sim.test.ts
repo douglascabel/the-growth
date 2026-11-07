@@ -24,7 +24,8 @@ describe('floor-level Jenga sculpture',()=>{
  },30000);
  it('keeps a completed tower stable before the extraction begins',async()=>{
    const s=createSim(()=>.5);s.physics=await createDynamics();
-   for(let i=0;i<Math.ceil((MAX_BARS*CYCLE+.4)*60);i++)stepSim(s,1/60);
+   while(s.phase==='build')stepSim(s,1/60);
+   for(let i=0;i<24;i++)stepSim(s,1/60);
    expect(s.phase).toBe('remove');expect(s.carry).toBe(false);
    expect(s.bars[53]?.p[1]).toBeCloseTo(.175,3);
  });
