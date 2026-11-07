@@ -1,168 +1,93 @@
-// Pure simulation for "The Growth": robot cycle, tower stacking, collapse.
-// Units: meters, Y up. Pedestal top at y = PED_H, centered at origin.
-
+// Pure sculpture choreography and rules. Units: metres, Y up.
 export const BAR = { L: 0.15, W: 0.05, H: 0.01 };
-export const PED = { S: 1.2, H: 1.0 };
 export const ROBOT_SCALE = 0.55;
-export const ROBOT_BASE = { x: -0.22, y: PED.H + 0.003181 * ROBOT_SCALE, z: -0.17 };
-export const TOWER = { x: 0.32, z: 0.32 };
-export const FEED = { x: -0.22, y: 1.15, z: 0.9 }; // top of feeder tray stack
-export const ARM = { a1: 0.33, h0: 0.78, L1: 1.25, L2: 1.35, T: 0.32 };
-export const MAX_BARS = 44;
-export const CYCLE = 1.7; // seconds per bar
-export const GRAVITY = 9.81;
-
-export type Bar = {
-  p: [number, number, number];
-  v: [number, number, number];
-  yaw: number; pitch: number; roll: number;
-  w: [number, number, number];
-  visible: boolean;
-};
-
+export const ROBOT_BASE = { x: -0.32, y: 0.003181 * ROBOT_SCALE, z: -0.28 };
+export const TOWER = { x: 0.34, z: 0.34 };
+export const FEED = { x: -0.3, y: BAR.H * 5, z: 0.65 };
+export const LAYERS = 18;
+export const MAX_BARS = LAYERS * 3;
+export const CYCLE = 2.5;
+export const REMOVE_CYCLE = 4;
+export type Vec = [number, number, number];
+export type Placement = { x: number; z: number; yaw: number; layer: number; slot: number };
+export type Bar = { p: Vec; yaw: number; pitch: number; roll: number; visible: boolean; layer: number; slot: number; q?: {x:number;y:number;z:number;w:number} };
+export type Dynamics = { reset: () => void; step: (s: Sim, dt: number) => boolean };
 export type Sim = {
-  t: number;
-  phase: "build" | "collapse" | "rest";
-  phaseT: number;
-  placed: number;
-  bars: Bar[];
-  plan: { x: number; z: number; yaw: number }[];
-  lean: { x: number; z: number };
-  carry: boolean;
-  tool: [number, number, number];
-  toolYaw: number;
-  sway: number;
+  t: number; phase: 'build' | 'remove' | 'collapse' | 'rest'; phaseT: number;
+  placed: number; bars: Bar[]; plan: Placement[]; carry: boolean; tool: Vec; toolYaw: number;
+  active: number; moves: number; removalHistory: number[]; destination?: Placement;
+  physics?: Dynamics; random: () => number;
 };
-
-const rand = (a: number, b: number) => a + Math.random() * (b - a);
-
-function makePlan() {
-  const dir = Math.random() * Math.PI * 2;
-  let x = TOWER.x, z = TOWER.z;
-  const plan = [];
-  for (let i = 0; i < MAX_BARS; i++) {
-    const drift = 0.0006 + i * 0.00009;
-    x += Math.cos(dir) * drift + rand(-0.0015, 0.0015);
-    z += Math.sin(dir) * drift + rand(-0.0015, 0.0015);
-    plan.push({ x, z, yaw: (i % 2 ? Math.PI / 2 : 0) + rand(-0.06, 0.06) });
-  }
-  return plan;
+export function placement(index: number): Placement {
+  const layer = Math.floor(index / 3), slot = index % 3;
+  const offset = (slot - 1) * BAR.W;
+  return { x: TOWER.x + (layer % 2 ? offset : 0), z: TOWER.z + (layer % 2 ? 0 : offset), yaw: layer % 2 ? Math.PI / 2 : 0, layer, slot };
 }
-
-export function createSim(): Sim {
-  return {
-    t: 0, phase: "build", phaseT: 0, placed: 0,
-    bars: Array.from({ length: MAX_BARS }, () => ({
-      p: [0, -10, 0], v: [0, 0, 0], yaw: 0, pitch: 0, roll: 0, w: [0, 0, 0], visible: false,
-    })),
-    plan: makePlan(), lean: { x: 0, z: 0 }, carry: false,
-    tool: [FEED.x, FEED.y + 0.4, FEED.z], toolYaw: 0, sway: 0,
-  };
+export function eligibleBars(s: Sim): number[] {
+  const top = Math.max(...s.bars.filter(b => b.visible).map(b => b.layer));
+  // Exclude the highest completed layer and all bars above it (standard Jenga rule).
+  const completed = s.bars.filter(b => b.visible && b.layer === top).length === 3 ? top : top - 1;
+  return s.bars.flatMap((b, i) => b.visible && b.layer < completed ? [i] : []);
 }
-
-const ss = (x: number) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
-function stepBuild(s: Sim) {
-  const i = s.placed;
-  const k = s.phaseT / CYCLE;
-   const target = s.plan[i];
-   if (!target) return;
-  const ty = PED.H + i * BAR.H + BAR.H;
-  const lift = 0.28;
-  const pick: [number, number, number] = [FEED.x, FEED.y + BAR.H, FEED.z];
-  const place: [number, number, number] = [target.x, ty, target.z];
-  const above = (p: [number, number, number], h: number): [number, number, number] => [p[0], p[1] + h, p[2]];
-  // keyframes along normalized cycle
-  const keys: [number, [number, number, number], number, boolean][] = [
-    [0.0, above(pick, lift), Math.PI / 2, false],
-    [0.12, pick, Math.PI / 2, false],
-    [0.2, pick, Math.PI / 2, true],
-    [0.32, above(pick, lift + 0.15), Math.PI / 2, true],
-    [0.62, above(place, lift), target.yaw, true],
-    [0.76, place, target.yaw, true],
-    [0.82, place, target.yaw, false],
-    [1.0, above(pick, lift), Math.PI / 2, false],
-  ];
-  let j = 0;
-  while (j < keys.length - 2 && k > keys[j + 1]![0]) j++;
-  const [k0, p0, y0, c0] = keys[j]!;
-  const [k1, p1, y1] = keys[j + 1]!;
-  const u = ss((k - k0) / (k1 - k0));
-  s.tool = [lerp(p0[0], p1[0], u), lerp(p0[1], p1[1], u), lerp(p0[2], p1[2], u)];
-  s.toolYaw = lerp(y0, y1, u);
-  s.carry = c0;
-  const bar = s.bars[i]!;
-  if (s.carry) {
-    bar.visible = true;
-    bar.p = [s.tool[0], s.tool[1] - BAR.H / 2, s.tool[2]];
-    bar.yaw = s.toolYaw; bar.pitch = 0; bar.roll = 0;
-  }
-  if (k >= 0.82) {
-    bar.visible = true;
-    bar.p = [target.x, ty - BAR.H / 2, target.z];
-    bar.yaw = target.yaw;
-  }
-  if (s.phaseT >= CYCLE) {
-    bar.p = [target.x, ty - BAR.H / 2, target.z];
-    bar.yaw = target.yaw;
-    s.placed++;
-    s.phaseT = 0;
-    if (s.placed >= MAX_BARS) { s.phase = "collapse"; s.phaseT = 0; startCollapse(s); }
-  }
-  s.sway = Math.max(0, s.placed - 18) * 0.00025;
+export function createSim(random = Math.random): Sim {
+  return { t: 0, phase: 'build', phaseT: 0, placed: 0, bars: Array.from({length: MAX_BARS}, () => ({p:[0,-10,0],yaw:0,pitch:0,roll:0,visible:false,layer:-1,slot:-1})), plan:Array.from({length:MAX_BARS},(_,i)=>placement(i)), carry:false,tool:[FEED.x,FEED.y+.25,FEED.z],toolYaw:Math.PI/2, active:-1,moves:0,removalHistory:[],random };
 }
-
-function startCollapse(s: Sim) {
-  const last = s.plan[s.placed - 1]!;
-  const len = Math.hypot(last.x - TOWER.x, last.z - TOWER.z) || 1;
-  const dx = (last.x - TOWER.x) / len, dz = (last.z - TOWER.z) / len;
-  for (let i = 0; i < s.placed; i++) {
-    const b = s.bars[i]!;
-    const h = (i + 0.5) * BAR.H;
-    const sp = h * 4 + rand(0, 0.15);
-    b.v = [dx * sp + rand(-0.1, 0.1), rand(-0.05, 0.1), dz * sp + rand(-0.1, 0.1)];
-    b.w = [rand(-3, 3) * (h * 5 + 0.2), rand(-2, 2), rand(-3, 3) * (h * 5 + 0.2)];
-  }
+const smooth = (x:number) => {const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
+const mix = (a:number,b:number,t:number) => a+(b-a)*t;
+type Key = [number,Vec,number,boolean];
+function animate(s:Sim, keys:Key[], k:number) {
+  let j=0;
+  while(j<keys.length-2 && k>(keys[j+1]?.[0] ?? 1)) j++;
+  const from=keys[j], to=keys[j+1]; if(!from || !to) return;
+  const u=smooth((k-from[0])/(to[0]-from[0]));
+  s.tool=[mix(from[1][0],to[1][0],u),mix(from[1][1],to[1][1],u),mix(from[1][2],to[1][2],u)];
+  s.toolYaw=mix(from[2],to[2],u);s.carry=from[3];
 }
-
-function stepCollapse(s: Sim, dt: number) {
-  for (let i = 0; i < s.placed; i++) {
-    const b = s.bars[i]!;
-    // delay lower bars a little: the tower peels from the top
-    const delay = (1 - i / s.placed) * 0.25;
-    if (s.phaseT < delay) continue;
-    b.v[1] -= GRAVITY * dt;
-    b.p[0] += b.v[0] * dt; b.p[1] += b.v[1] * dt; b.p[2] += b.v[2] * dt;
-    b.yaw += b.w[1] * dt; b.pitch += b.w[0] * dt; b.roll += b.w[2] * dt;
-    const onPed = Math.abs(b.p[0]) < PED.S / 2 && Math.abs(b.p[2]) < PED.S / 2;
-    const floor = (onPed ? PED.H : 0) + BAR.H / 2;
-    if (b.p[1] < floor && (onPed ? b.p[1] > PED.H - 0.05 : true)) {
-      b.p[1] = floor;
-      b.v[1] *= -0.25;
-      b.v[0] *= 0.6; b.v[2] *= 0.6;
-      b.w = [b.w[0] * 0.4, b.w[1] * 0.5, b.w[2] * 0.4];
-      // settle flat
-      const snap = (a: number) => Math.round(a / Math.PI) * Math.PI;
-      b.pitch = lerp(b.pitch, snap(b.pitch), 0.35);
-      b.roll = lerp(b.roll, snap(b.roll), 0.35);
-    }
-  }
-  s.tool = [FEED.x + 0.3, FEED.y + 0.7, FEED.z * 0.5];
-  if (s.phaseT > 4.5) { s.phase = "rest"; s.phaseT = 0; }
+function seat(b:Bar,p:Placement) {
+  b.p=[p.x,(p.layer+.5)*BAR.H,p.z]; b.yaw=p.yaw;b.layer=p.layer;b.slot=p.slot;b.visible=true;b.pitch=0;b.roll=0;delete b.q;
 }
-
-export function stepSim(s: Sim, dtRaw: number) {
-  const dt = Math.min(dtRaw, 0.05);
-  s.t += dt; s.phaseT += dt;
-  if (s.phase === "build") stepBuild(s);
-  else if (s.phase === "collapse") stepCollapse(s, dt);
-  else if (s.phaseT > 1.5) {
-    const fresh = createSim();
-    Object.assign(s, fresh, { t: s.t });
-  }
+function follow(s:Sim,b:Bar) {b.visible=true;b.p=[s.tool[0],s.tool[1]-BAR.H/2,s.tool[2]];b.yaw=s.toolYaw;b.pitch=0;b.roll=0;delete b.q;}
+function stepBuild(s:Sim) {
+  const p=s.plan[s.placed], b=s.bars[s.placed]; if(!p||!b)return;
+  s.active=s.placed; const k=s.phaseT/CYCLE;
+  const pick:Vec=[FEED.x,FEED.y,FEED.z], dest:Vec=[p.x,(p.layer+1)*BAR.H,p.z];
+  const above=(v:Vec):Vec=>[v[0],v[1]+.22,v[2]];
+  animate(s,[[0,above(pick),Math.PI/2,false],[.12,pick,Math.PI/2,false],[.2,pick,Math.PI/2,true],[.32,above(pick),Math.PI/2,true],[.62,above(dest),p.yaw,true],[.76,dest,p.yaw,true],[.82,dest,p.yaw,false],[1,above(pick),Math.PI/2,false]],k);
+  if(s.carry)follow(s,b);
+  if(k>=.82)seat(b,p);
+  if(s.phaseT>=CYCLE){seat(b,p);s.placed++;s.phaseT=0;s.active=-1;if(s.placed===MAX_BARS){s.phase='remove';s.physics?.reset();}}
 }
-
+function beginRemoval(s:Sim) {
+  const eligible=eligibleBars(s); const i=eligible[Math.min(eligible.length-1,Math.floor(s.random()*eligible.length))];
+  if(i===undefined){s.phase='collapse';return;}
+  s.active=i;s.removalHistory.push(i);
+  s.destination=placement(MAX_BARS+s.moves);
+}
+function stepRemove(s:Sim) {
+  if(s.active<0)beginRemoval(s);
+  const b=s.bars[s.active],dest=s.destination;if(!b||!dest)return;
+  const k=s.phaseT/REMOVE_CYCLE;
+  const origin:Vec=[b.p[0],b.p[1]+BAR.H/2,b.p[2]];
+  // Store original position as a plan entry for this move so carrying cannot move its origin.
+  if(k<.02)s.plan[s.active]={x:origin[0],z:origin[2],yaw:b.yaw,layer:b.layer,slot:b.slot};
+  const source=s.plan[s.active];if(!source)return;
+  const pick:Vec=[source.x,(source.layer+1)*BAR.H,source.z];
+  const extract:Vec=[pick[0]+Math.cos(source.yaw)*.2,pick[1],pick[2]-Math.sin(source.yaw)*.2];
+  const high:Vec=[extract[0],Math.max(.3,(dest.layer+1)*BAR.H+.18),extract[2]];
+  const place:Vec=[dest.x,(dest.layer+1)*BAR.H,dest.z];
+  animate(s,[[0,[pick[0],pick[1]+.18,pick[2]],source.yaw,false],[.16,pick,source.yaw,false],[.22,pick,source.yaw,true],[.43,extract,source.yaw,true],[.56,high,source.yaw,true],[.72,[place[0],high[1],place[2]],dest.yaw,true],[.82,place,dest.yaw,true],[.88,place,dest.yaw,false],[1,[place[0],place[1]+.2,place[2]],dest.yaw,false]],k);
+  if(k>=.22 && k<.88){s.carry=true;follow(s,b);}
+  if(k>=.88)seat(b,dest);
+  if(s.phaseT>=REMOVE_CYCLE){seat(b,dest);s.moves++;s.phaseT=0;s.active=-1;delete s.destination;}
+}
+export function stepSim(s:Sim,dtRaw:number) {
+  const dt=Math.max(0,Math.min(dtRaw,.05));s.t+=dt;s.phaseT+=dt;
+  if(s.phase==='build')stepBuild(s);
+  else if(s.phase==='remove')stepRemove(s);
+  if((s.phase==='remove'||s.phase==='collapse') && s.physics?.step(s,dt) && s.phase==='remove'){s.phase='collapse';s.phaseT=0;s.carry=false;s.active=-1;}
+  if(s.phase==='collapse'){s.tool=[ROBOT_BASE.x,.6,ROBOT_BASE.z+.3];if(s.phaseT>5){s.phase='rest';s.phaseT=0;}}
+  else if(s.phase==='rest'&&s.phaseT>2){const physics=s.physics;physics?.reset();Object.assign(s,createSim(s.random),{t:s.t,physics});}
+}
 /**
  * Joint pivots of the uploaded "Industrial robot arm" OBJ, in model space
  * (meters, Y up, arm reaching toward -Z, yaw axis at x = -0.05).

@@ -33,3 +33,5 @@ use the editor.
 - Keep placement and robot scaling in the pure growth-sim module so IK and rendering use the same coordinate transform.
 - Normalize a cloned supplied STL once to BAR dimensions and share it through instancing for tower and feeder bars to avoid redundant geometry and draw calls.
 - Development-only window.__growth exposes state and sim(seconds); #growth[data-scene-ready] is set after loaded artwork draws, enabling reproducible scene checks.
+- Use Rapier in a browser-initialized dynamics adapter with metre-scaled contact tolerances; keep choreography and eligibility rules independent of rendering so Jenga collapse is physical and testable.
+- Model the gallery as navigable geometry from the room reference rather than a flat photo backdrop, preserving free orbit and zoom.

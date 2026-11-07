@@ -1,4 +1,4 @@
-import { Canvas, useFrame, useLoader } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import lingotAsset from "@/assets/gold-filipe-light.stl.asset.json";
@@ -6,10 +6,12 @@ import robotObj from "@/assets/industrial_robot_arm.obj.asset.json";
 import colorTex from "@/assets/robot_arm_color.jpg.asset.json";
 import normalTex from "@/assets/robot_arm_normal.jpg.asset.json";
 import roughTex from "@/assets/robot_arm_roughness.jpg.asset.json";
-import { ContactShadows, Environment, useTexture, Lightformer, OrbitControls, RoundedBox } from "@react-three/drei";
+import { ContactShadows, Environment, useTexture, Lightformer, OrbitControls } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { RIG, BAR, FEED, MAX_BARS, PED, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
+import { RIG, BAR, FEED, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
+import { createDynamics } from "@/lib/growth-physics";
+import GalleryRoom from "./GalleryRoom";
 
 
 function useConcreteTexture() {
@@ -18,23 +20,23 @@ function useConcreteTexture() {
     c.width = c.height = 512;
     const g = c.getContext("2d");
     if (!g) return new THREE.Texture();
-    g.fillStyle = "#8c8a86";
+    g.fillStyle = "#a9ada9";
     g.fillRect(0, 0, 512, 512);
     for (let i = 0; i < 18000; i++) {
-      const v = 110 + Math.random() * 60;
+      const v = 140 + Math.random() * 50;
       g.fillStyle = `rgba(${v},${v - 2},${v - 5},${Math.random() * 0.25})`;
       g.fillRect(Math.random() * 512, Math.random() * 512, 1 + Math.random() * 3, 1 + Math.random() * 3);
     }
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(8, 8);
+    t.repeat.set(18, 18);
     t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }, []);
 }
 
-const gold = new THREE.MeshPhysicalMaterial({ color: "#e8b54a", metalness: 1, roughness: 0.18, clearcoat: 0.3 });
-const dark = new THREE.MeshStandardMaterial({ color: "#222326", metalness: 0.6, roughness: 0.45 });
+const gold = new THREE.MeshPhysicalMaterial({ color: "#e8b54a", metalness: 1, roughness: 0.24, clearcoat: 0.3 });
+
 
 function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
   const obj = useLoader(OBJLoader, robotObj.url);
@@ -107,6 +109,7 @@ function Bars({ sim }: { sim: ReturnType<typeof createSim> }) {
   const source = useLoader(STLLoader, lingotAsset.url);
   const geometry = useMemo(() => {
     const g = source.clone();
+    g.rotateX(-Math.PI / 2);
     g.computeBoundingBox();
     const bounds = g.boundingBox;
     if (!bounds) return g;
@@ -125,7 +128,8 @@ function Bars({ sim }: { sim: ReturnType<typeof createSim> }) {
     if (!mesh) return;
     sim.bars.forEach((b, i) => {
       dummy.position.set(...b.p);
-      dummy.rotation.set(b.pitch, b.yaw, b.roll);
+      if (b.q) dummy.quaternion.set(b.q.x, b.q.y, b.q.z, b.q.w);
+      else dummy.rotation.set(b.pitch, b.yaw, b.roll);
       dummy.scale.setScalar(b.visible ? 1 : 0);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
@@ -146,6 +150,12 @@ function Bars({ sim }: { sim: ReturnType<typeof createSim> }) {
 
 function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
   const n = useRef(0);
+  const ready = useRef(false);
+  useEffect(() => {
+    let live = true;
+    createDynamics().then(physics => { if (live) {sim.physics = physics; ready.current = true;} });
+    return () => {live = false;};
+  }, [sim]);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const debug = {
@@ -156,7 +166,7 @@ function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
     return () => { Reflect.deleteProperty(window, "__growth"); };
   }, [sim]);
   useFrame((_, d) => {
-    stepSim(sim, d);
+    if (ready.current) stepSim(sim, d);
     if (++n.current === 3) document.querySelector("#growth")?.setAttribute("data-scene-ready", "1");
   }, -1);
   return null;
@@ -165,13 +175,20 @@ function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
 function World() {
   const floorTex = useConcreteTexture();
   const sim = useMemo(() => createSim(), []);
+  const { camera, size } = useThree();
+  useEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    camera.fov = size.width < 600 ? 60 : 50;
+    camera.updateProjectionMatrix();
+  }, [camera, size.width]);
   return (
     <>
-      <color attach="background" args={["#d9d6d0"]} />
-      <fog attach="fog" args={["#d9d6d0", 9, 22]} />
-      <ambientLight intensity={0.15} />
+      <color attach="background" args={["#e8eae6"]} />
+      <fog attach="fog" args={["#e8eae6", 15, 35]} />
+      <group scale={0.65}><GalleryRoom /></group>
+      <ambientLight intensity={0.5} />
       <directionalLight
-        position={[3, 6, 2.5]} intensity={2.2} castShadow
+        position={[3, 7, -4]} intensity={2.2} castShadow
         shadow-mapSize={[2048, 2048]} shadow-bias={-0.0002} shadow-normalBias={0.02}
         shadow-camera-left={-4} shadow-camera-right={4} shadow-camera-top={4} shadow-camera-bottom={-4}
       />
@@ -185,21 +202,9 @@ function World() {
       {/* floor */}
       <mesh rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[40, 40]} />
-        <meshStandardMaterial map={floorTex} roughness={0.85} metalness={0} />
+        <meshStandardMaterial map={floorTex} roughness={0.42} metalness={0} />
       </mesh>
       <ContactShadows position={[0, 0.002, 0]} scale={10} blur={2.5} opacity={0.5} far={2} />
-
-      {/* pedestal */}
-      <RoundedBox args={[PED.S, PED.H, PED.S]} radius={0.005} position={[0, PED.H / 2, 0]} castShadow receiveShadow>
-        <meshPhysicalMaterial color="#f4f2ee" roughness={0.55} clearcoat={0.1} />
-      </RoundedBox>
-
-      {/* feeder table with a stock of bars */}
-      <group position={[FEED.x, 0, FEED.z]}>
-        <mesh material={dark} castShadow receiveShadow position={[0, (FEED.y - 0.06) / 2, 0]}>
-          <boxGeometry args={[0.45, FEED.y - 0.06, 0.35]} />
-        </mesh>
-      </group>
 
       <Suspense fallback={null}>
         <Robot sim={sim} />
@@ -208,7 +213,7 @@ function World() {
       </Suspense>
 
       <OrbitControls
-        target={[0, 1.2, 0.2]} enableDamping dampingFactor={0.08}
+        target={[0, 0.75, 0.15]} enableDamping dampingFactor={0.08}
         minDistance={0.6} maxDistance={12} maxPolarAngle={Math.PI / 2 - 0.03}
         autoRotate autoRotateSpeed={0.35}
       />
@@ -222,7 +227,7 @@ export default function GrowthScene() {
       <Canvas
         shadows
         dpr={[1, 2]}
-        camera={{ position: [3.2, 2.2, 4.2], fov: 38, near: 0.05, far: 60 }}
+        camera={{ position: [2.25, 1.4, 2.9], fov: 42, near: 0.05, far: 60 }}
         gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       >
         <World />
