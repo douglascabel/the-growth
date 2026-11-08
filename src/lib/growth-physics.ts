@@ -8,7 +8,8 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   let pusher:RAPIER.RigidBody|undefined;
   let quietTime=0;
   const reset=()=>{
-    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=24;
+    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=40;
+    world.integrationParameters.contact_natural_frequency=120;
     world.integrationParameters.lengthUnit=.1;
     world.integrationParameters.normalizedAllowedLinearError=.0005;
     world.integrationParameters.normalizedPredictionDistance=.01;
