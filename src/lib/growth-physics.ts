@@ -9,7 +9,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   let quietTime=0;
   const reset=()=>{
     world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=40;
-    world.integrationParameters.contact_natural_frequency=60;
+    world.integrationParameters.contact_natural_frequency=90;
     world.integrationParameters.lengthUnit=.1;
     world.integrationParameters.normalizedAllowedLinearError=.0005;
     world.integrationParameters.normalizedPredictionDistance=.01;
@@ -37,7 +37,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(.009,BAR.H*.32,BAR.W*.27).setFriction(.4),pusher);}
     }else if(pusher){world.removeRigidBody(pusher);pusher=undefined;}
     // Fixed substeps keep stacking and contact independent of render frame rate.
-    const steps=Math.max(1,Math.ceil(dt/(1/120)));world.timestep=dt/steps;
+    const steps=Math.max(1,Math.ceil(dt/(1/240)));world.timestep=dt/steps;
     const held=bodies.get(s.active),bar=s.bars[s.active],start=held?.translation(),startQ=held?.rotation();
     const pushStart=pusher?.translation();
     for(let i=0;i<steps;i++){
