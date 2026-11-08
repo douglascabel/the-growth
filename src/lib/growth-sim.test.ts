@@ -23,7 +23,8 @@ describe('reach-limited sculpture',()=>{
  });
  it('only chooses bars below the highest completed layer',()=>{
    const s=createSim(()=>.7);advance(s,MAX_BARS*CYCLE+.1);expect(s.phase).toBe('remove');expect(s.removalHistory).toHaveLength(1);
-   expect(s.removalHistory[0]).toBe(65);expect(eligibleBars(s)).not.toContain(95);
+   const chosen=s.removalHistory[0];expect(chosen).toBe(66);expect(chosen===undefined?99:s.bars[chosen]?.layer).toBeLessThan(31);
+   expect(eligibleBars(s).every(i=>(s.bars[i]?.layer??99)<31)).toBe(true);
  });
  it('selects both push/pull methods and both opposite ends',()=>{
    for(const [r,mode,side] of [[.1,'pull',-1],[.9,'push',1]] as const){const s=createSim(()=>r);advance(s,MAX_BARS*CYCLE+.1);expect(s.mode).toBe(mode);expect(s.side).toBe(side);}

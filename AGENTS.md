@@ -37,3 +37,4 @@ use the editor.
 - Model the gallery as navigable geometry from the room reference rather than a flat photo backdrop, preserving free orbit and zoom.
 - Derive tower height from the shared rig reach envelope; preserve bar identity and dynamic poses across collapse/recovery, so new towers reuse the actual pile.
 - Normalize supplied lingots through one helper shared with the convex physics hull; the source positive Y face is the embossed top.
+- Idealize seated tower supports during construction; release them together before extraction, while the uncollected pile always remains dynamic. This avoids numerical drift during tall builds without fabricating collapse.
