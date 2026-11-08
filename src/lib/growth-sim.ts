@@ -53,9 +53,9 @@ function follow(s:Sim,b:Bar,u=1) {
   }else b.q=target;
 }
 function rememberSource(s:Sim,b:Bar) {s.source={p:[...b.p],yaw:b.q?Math.atan2(2*(b.q.w*b.q.y+b.q.x*b.q.z),1-2*(b.q.y*b.q.y+b.q.z*b.q.z)):b.yaw,...(b.q?{q:{...b.q}}:{})};s.released=false;}
-function release(s:Sim,b:Bar,p:Placement) {
+function release(s:Sim,b:Bar,p:Placement,toolY=(p.layer+1)*BAR.H+.0008) {
   if(s.released)return;
-  b.p=[p.x,(p.layer+.5)*BAR.H+.0008,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};
+  b.p=[p.x,toolY-BAR.H/2,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};
   b.layer=p.layer;b.slot=p.slot;b.inTower=true;s.released=true;
 }
 function stepBuild(s:Sim) {
@@ -68,12 +68,13 @@ function stepBuild(s:Sim) {
     if(s.generation>0)s.recoveryHistory.push(i);
   }
   const p=placement(s.placed,s.tower),b=s.bars[s.active],source=s.source;if(!b||!source)return;
-  const k=s.phaseT/CYCLE,pick:Vec=[source.p[0],source.p[1]+BAR.H/2,source.p[2]],dest:Vec=[p.x,(p.layer+1)*BAR.H+.0008,p.z];
+  const support=p.layer===0?0:Math.max(0,...s.bars.filter(item=>item.inTower&&item.layer===p.layer-1).map(item=>item.p[1]+BAR.H/2));
+  const k=s.phaseT/CYCLE,pick:Vec=[source.p[0],source.p[1]+BAR.H/2,source.p[2]],dest:Vec=[p.x,support+BAR.H+.0008,p.z];
   const lift:Vec=[pick[0],Math.min(maxToolHeight(pick[0],pick[2])-.01,Math.max(pick[1]+.22,dest[1]+.15)),pick[2]];
   const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,dest[1]+.15),dest[2]];
   animate(s,[[0,lift,source.yaw,false],[.15,pick,source.yaw,false],[.22,pick,source.yaw,true],[.4,lift,source.yaw,true],[.65,above,p.yaw,true],[.8,dest,p.yaw,true],[.85,dest,p.yaw,false],[1,above,p.yaw,false]],k);
   if(s.carry)follow(s,b,smooth((k-.22)/.18));
-  if(k>=.85)release(s,b,p);
+  if(k>=.85)release(s,b,p,dest[1]);
   if(k>=1-1e-8){s.placed++;s.phaseT=0;s.active=-1;delete s.source;if(s.placed>=s.layers*3){s.phase='remove';}}
 }
 function beginRemoval(s:Sim) {
