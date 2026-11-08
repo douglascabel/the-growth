@@ -25,8 +25,6 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       }
       if(s.active===i&&s.carry){
         if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
-        body.setNextKinematicTranslation({x:b.p[0],y:b.p[1],z:b.p[2]});
-        body.setNextKinematicRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)});
       }else if(body.bodyType()!==RAPIER.RigidBodyType.Dynamic){
         body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);
         body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);
@@ -36,11 +34,21 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     // Pushes transfer force through contact; the target remains fully dynamic.
     if(s.push){
       if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(.009,BAR.H*.32,BAR.W*.27).setFriction(.4),pusher);}
-      pusher.setNextKinematicTranslation({x:s.push.p[0],y:s.push.p[1],z:s.push.p[2]});
     }else if(pusher){world.removeRigidBody(pusher);pusher=undefined;}
     // Fixed substeps keep stacking and contact independent of render frame rate.
     const steps=Math.max(1,Math.ceil(dt/(1/120)));world.timestep=dt/steps;
-    for(let i=0;i<steps;i++)world.step();
+    const held=bodies.get(s.active),bar=s.bars[s.active],start=held?.translation(),startQ=held?.rotation();
+    const pushStart=pusher?.translation();
+    for(let i=0;i<steps;i++){
+      const u=(i+1)/steps;
+      if(s.carry&&held&&bar&&start&&startQ){
+        held.setNextKinematicTranslation({x:start.x+(bar.p[0]-start.x)*u,y:start.y+(bar.p[1]-start.y)*u,z:start.z+(bar.p[2]-start.z)*u});
+        const q=bar.q??{x:0,y:Math.sin(bar.yaw/2),z:0,w:Math.cos(bar.yaw/2)};
+        held.setNextKinematicRotation({x:startQ.x+(q.x-startQ.x)*u,y:startQ.y+(q.y-startQ.y)*u,z:startQ.z+(q.z-startQ.z)*u,w:startQ.w+(q.w-startQ.w)*u});
+      }
+      if(pusher&&s.push&&pushStart)pusher.setNextKinematicTranslation({x:pushStart.x+(s.push.p[0]-pushStart.x)*u,y:pushStart.y+(s.push.p[1]-pushStart.y)*u,z:pushStart.z+(s.push.p[2]-pushStart.z)*u});
+      world.step();
+    }
     let fallen=false,quiet=true;
     for(const [i,body] of bodies){
       const b=s.bars[i];if(!b||(s.active===i&&s.carry))continue;
