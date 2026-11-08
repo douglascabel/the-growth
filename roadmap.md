@@ -1,5 +1,5 @@
-# Floor-level gallery sculpture
-- [x] Correct lingot orientation and retain 15 × 5 × 1 cm; verify the shared base axis and floor contact in rendered views.
-- [x] Build Jenga layers and randomly remove eligible bars until physical collapse.
-- [x] Remove pedestals and recreate the reference room ambiance.
-- [x] Pass eight tests and render desktop/mobile, including orbit and zoom; not published.
+# Reach-limited Jenga sculpture
+- [ ] Correct 155 × 41.45 × 62.14 mm dimensions and inscription-up placement.
+- [ ] Build to the robot's reachable height with deliberate multi-side pull/push extraction and physical collapse.
+- [ ] Recover settled scattered bars and rebuild beside the pile without resetting them.
+- [ ] Test changed rules and verify desktop/mobile animated cycle; do not publish.
