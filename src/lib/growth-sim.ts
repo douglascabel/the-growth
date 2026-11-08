@@ -52,7 +52,7 @@ function follow(s:Sim,b:Bar,u=1) {
     const n=Math.hypot(v.x,v.y,v.z,v.w);b.q={x:v.x/n,y:v.y/n,z:v.z/n,w:v.w/n};
   }else b.q=target;
 }
-function rememberSource(s:Sim,b:Bar) {s.source={p:[...b.p],yaw:b.q?Math.atan2(2*(b.q.w*b.q.y+b.q.x*b.q.z),1-2*(b.q.y*b.q.y+b.q.z*b.q.z)):b.yaw,q:b.q?{...b.q}:undefined};s.released=false;}
+function rememberSource(s:Sim,b:Bar) {s.source={p:[...b.p],yaw:b.q?Math.atan2(2*(b.q.w*b.q.y+b.q.x*b.q.z),1-2*(b.q.y*b.q.y+b.q.z*b.q.z)):b.yaw,...(b.q?{q:{...b.q}}:{})};s.released=false;}
 function release(s:Sim,b:Bar,p:Placement) {
   if(s.released)return;
   b.p=[p.x,(p.layer+.5)*BAR.H+.0008,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};
