@@ -1,39 +1,53 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BAR, type Sim, type Dynamics } from './growth-sim';
-let ready: Promise<void> | undefined;
-export async function createDynamics(): Promise<Dynamics> {
-  ready ??= RAPIER.init(); await ready;
-  let world: RAPIER.World;
-  let bodies = new Map<number,RAPIER.RigidBody>();
-  let released = false;
+import { BAR, type Dynamics } from './growth-sim';
+let ready:Promise<void>|undefined;
+export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
+  ready??=RAPIER.init();await ready;
+  let world:RAPIER.World;
+  let bodies=new Map<number,RAPIER.RigidBody>();
+  let pusher:RAPIER.RigidBody|undefined;
+  let quietTime=0;
   const reset=()=>{
-    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=12;
+    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=24;
     world.integrationParameters.lengthUnit=.1;
-    world.integrationParameters.normalizedAllowedLinearError=.001;
+    world.integrationParameters.normalizedAllowedLinearError=.0005;
     world.integrationParameters.normalizedPredictionDistance=.01;
-    bodies=new Map();released=false;
-    world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.65));
+    bodies=new Map();pusher=undefined;quietTime=0;
+    world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.7));
   };reset();
-  return {reset,step(s,dt){
+  return {reset,settled:()=>quietTime>1.5,step(s,dt){
     for(const [i,b] of s.bars.entries()){
-      if(!b.visible)continue;
       let body=bodies.get(i);
       if(!body){
-        const desc = released ? RAPIER.RigidBodyDesc.dynamic() : RAPIER.RigidBodyDesc.fixed();
-        body=world.createRigidBody(desc.setTranslation(...b.p).setRotation({x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.3).setAngularDamping(.4).setCcdEnabled(true));
-        world.createCollider(RAPIER.ColliderDesc.cuboid(BAR.L/2,BAR.H/2,BAR.W/2).setContactSkin(0).setDensity(1000).setFriction(.55).setRestitution(.02),body);body.sleep();bodies.set(i,body);
+        body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8).setCcdEnabled(true));
+        const collider=(hull?RAPIER.ColliderDesc.convexHull(hull):null)??RAPIER.ColliderDesc.cuboid(BAR.L/2,BAR.H/2,BAR.W/2);
+        world.createCollider(collider.setDensity(19300).setFriction(.5).setRestitution(.01),body);bodies.set(i,body);
       }
-      const moving=s.active===i && s.carry;
-      if(moving && !released){released=true;for(const item of bodies.values())item.setBodyType(RAPIER.RigidBodyType.Dynamic,true);}
-      if(moving){body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);body.setNextKinematicTranslation({x:b.p[0],y:b.p[1],z:b.p[2]});body.setNextKinematicRotation({x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)});}
-      else if(released && body.bodyType()!==RAPIER.RigidBodyType.Dynamic){body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setLinvel({x:0,y:0,z:0},true);body.setAngvel({x:0,y:0,z:0},true);}
+      if(s.active===i&&s.carry){
+        if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
+        body.setNextKinematicTranslation({x:b.p[0],y:b.p[1],z:b.p[2]});
+        body.setNextKinematicRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)});
+      }else if(body.bodyType()!==RAPIER.RigidBodyType.Dynamic){
+        body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);
+        body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);
+        body.setLinvel({x:0,y:0,z:0},true);body.setAngvel({x:0,y:0,z:0},true);
+      }
     }
-    world.timestep=dt;world.step();let fallen=false;
+    // Pushes transfer force through contact; the target remains fully dynamic.
+    if(s.push){
+      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(.009,BAR.H*.32,BAR.W*.27).setFriction(.4),pusher);}
+      pusher.setNextKinematicTranslation({x:s.push.p[0],y:s.push.p[1],z:s.push.p[2]});
+    }else if(pusher){world.removeRigidBody(pusher);pusher=undefined;}
+    // Fixed substeps keep stacking and contact independent of render frame rate.
+    const steps=Math.max(1,Math.ceil(dt/(1/120)));world.timestep=dt/steps;
+    for(let i=0;i<steps;i++)world.step();
+    let fallen=false,quiet=true;
     for(const [i,body] of bodies){
-      const b=s.bars[i];if(!b || (s.active===i && s.carry))continue;
-      const p=body.translation(),q=body.rotation();b.p=[p.x,p.y,p.z];b.q=q;
-      if(b.layer>2&&(Math.abs(q.x)+Math.abs(q.z)>.22||p.y<(b.layer+.5)*BAR.H-.027))fallen=true;
+      const b=s.bars[i];if(!b||(s.active===i&&s.carry))continue;
+      const p=body.translation(),q=body.rotation();b.p=[p.x,p.y,p.z];b.q={...q};
+      const v=body.linvel(),a=body.angvel();if(Math.hypot(v.x,v.y,v.z)>.025||Math.hypot(a.x,a.y,a.z)>.1)quiet=false;
+      if(b.inTower&&b.layer>1&&(1-2*(q.x*q.x+q.z*q.z)<.85||p.y<(b.layer+.5)*BAR.H-BAR.H*.65))fallen=true;
     }
-    return fallen;
+    quietTime=quiet?quietTime+dt:0;return fallen;
   }};
 }
