@@ -55,7 +55,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       const b=s.bars[i];if(!b||(s.active===i&&s.carry))continue;
       const p=body.translation(),q=body.rotation();b.p=[p.x,p.y,p.z];b.q={...q};
       const v=body.linvel(),a=body.angvel();if(Math.hypot(v.x,v.y,v.z)>.025||Math.hypot(a.x,a.y,a.z)>.1)quiet=false;
-      if(b.inTower&&b.layer>1&&(1-2*(q.x*q.x+q.z*q.z)<.85||p.y<(b.layer+.5)*BAR.H-BAR.H*.65))fallen=true;
+      if(b.inTower&&b.layer>1&&(1-2*(q.x*q.x+q.z*q.z)<.85||p.y<(b.layer+.5)*BAR.H*.75))fallen=true;
     }
     quietTime=quiet?quietTime+dt:0;return fallen;
   }};
