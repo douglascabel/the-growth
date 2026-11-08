@@ -9,8 +9,9 @@ import roughTex from "@/assets/robot_arm_roughness.jpg.asset.json";
 import { ContactShadows, Environment, useTexture, Lightformer, OrbitControls } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { RIG, BAR, FEED, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
+import { RIG, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
 import { createDynamics } from "@/lib/growth-physics";
+import { normalizeLingot } from "@/lib/lingot-geometry";
 import GalleryRoom from "./GalleryRoom";
 
 
@@ -107,19 +108,7 @@ function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
 
 function Bars({ sim }: { sim: ReturnType<typeof createSim> }) {
   const source = useLoader(STLLoader, lingotAsset.url);
-  const geometry = useMemo(() => {
-    const g = source.clone();
-    g.rotateX(-Math.PI / 2);
-    g.computeBoundingBox();
-    const bounds = g.boundingBox;
-    if (!bounds) return g;
-    const size = bounds.getSize(new THREE.Vector3());
-    const center = bounds.getCenter(new THREE.Vector3());
-    g.translate(-center.x, -center.y, -center.z);
-    g.scale(BAR.L / size.x, BAR.H / size.y, BAR.W / size.z);
-    g.computeVertexNormals();
-    return g;
-  }, [source]);
+  const geometry = useMemo(() => normalizeLingot(source), [source]);
   const instances = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   useEffect(() => () => geometry.dispose(), [geometry]);
@@ -134,28 +123,23 @@ function Bars({ sim }: { sim: ReturnType<typeof createSim> }) {
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     });
-    for (let i = 0; i < 5; i++) {
-      dummy.position.set(FEED.x, FEED.y - (4 - i) * BAR.H - BAR.H / 2, FEED.z);
-      dummy.rotation.set(0, Math.PI / 2, 0);
-      dummy.scale.setScalar(1);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(MAX_BARS + i, dummy.matrix);
-    }
     mesh.instanceMatrix.needsUpdate = true;
   });
   return (
-    <instancedMesh ref={instances} args={[geometry, gold, MAX_BARS + 5]} castShadow receiveShadow frustumCulled={false} />
+    <instancedMesh ref={instances} args={[geometry, gold, MAX_BARS]} castShadow receiveShadow frustumCulled={false} />
   );
 }
 
 function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
+  const source = useLoader(STLLoader, lingotAsset.url);
+  const geometry = useMemo(() => normalizeLingot(source), [source]);
   const n = useRef(0);
   const ready = useRef(false);
   useEffect(() => {
     let live = true;
-    createDynamics().then(physics => { if (live) {sim.physics = physics; ready.current = true;} });
+    createDynamics(new Float32Array(geometry.getAttribute('position').array)).then(physics => { if (live) {sim.physics = physics; ready.current = true;} });
     return () => {live = false;};
-  }, [sim]);
+  }, [sim, geometry]);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const debug = {
@@ -167,7 +151,7 @@ function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
   }, [sim]);
   useFrame((_, d) => {
     if (ready.current) stepSim(sim, d);
-    if (++n.current === 3) document.querySelector("#growth")?.setAttribute("data-scene-ready", "1");
+    if (ready.current && ++n.current === 3) document.querySelector("#growth")?.setAttribute("data-scene-ready", "1");
   }, -1);
   return null;
 }
@@ -213,7 +197,7 @@ function World() {
       </Suspense>
 
       <OrbitControls
-        target={[0, 0.75, 0.15]} enableDamping dampingFactor={0.08}
+        target={[0, 0.65, 0.15]} enableDamping dampingFactor={0.08}
         minDistance={0.6} maxDistance={12} maxPolarAngle={Math.PI / 2 - 0.03}
         autoRotate autoRotateSpeed={0.35}
       />
