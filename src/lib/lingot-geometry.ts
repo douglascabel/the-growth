@@ -12,7 +12,10 @@ export function normalizeLingot(source:THREE.BufferGeometry) {
 }
 /** Unique convex-hull corner points; full STL vertex sets make Rapier hulls extremely slow. */
 export function lingotHullPoints(geometry: THREE.BufferGeometry): Float32Array {
-  const hull = new ConvexHull().setFromObject(new THREE.Mesh(geometry));
+  // Snap to a 3 mm grid first: keeps the bevelled silhouette with a few dozen corners.
+  const src = geometry.getAttribute('position'), grid = new Map<string, THREE.Vector3>(), q = 0.003;
+  for (let i = 0; i < src.count; i++) { const v = new THREE.Vector3(Math.round(src.getX(i) / q) * q, Math.round(src.getY(i) / q) * q, Math.round(src.getZ(i) / q) * q); grid.set(`${v.x},${v.y},${v.z}`, v); }
+  const hull = new ConvexHull().setFromPoints([...grid.values()]);
   const seen = new Map<string, THREE.Vector3>();
   for (const face of hull.faces) {
     let e = face.edge;
