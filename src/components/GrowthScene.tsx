@@ -11,7 +11,7 @@ import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { RIG, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
 import { createDynamics } from "@/lib/growth-physics";
-import { normalizeLingot } from "@/lib/lingot-geometry";
+import { lingotHullPoints, normalizeLingot } from "@/lib/lingot-geometry";
 import GalleryRoom from "./GalleryRoom";
 
 
@@ -137,7 +137,7 @@ function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
   const ready = useRef(false);
   useEffect(() => {
     let live = true;
-    createDynamics(new Float32Array(geometry.getAttribute('position').array)).then(physics => { if (live) {sim.physics = physics; ready.current = true;} });
+    createDynamics(lingotHullPoints(geometry)).then(physics => { if (live) {sim.physics = physics; ready.current = true;} });
     return () => {live = false;};
   }, [sim, geometry]);
   useEffect(() => {

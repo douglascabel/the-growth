@@ -1,5 +1,8 @@
 // Pure choreography. Metres, Y up; physics owns released bar poses.
 export const BAR = { L: .155, W: .06214, H: .04145 };
+// The lingot tapers (bottom ~154 x 61.5 mm, top ~125 x 49 mm). Slots are packed
+// as tight as the bottoms allow so cross bars keep their centre over the next layer.
+export const SLOT = .0617;
 export const ROBOT_SCALE = .55;
 export const ROBOT_BASE = { x: -.32, y: .003181 * ROBOT_SCALE, z: -.28 };
 export const TOWER = { x: .34, z: .34 };
@@ -20,7 +23,7 @@ export type Sim = {
   mode:'pull'|'push'; side:number; push?:{p:Vec;yaw:number}; recoveryHistory:number[];
 };
 export function placement(index:number, tower=TOWER):Placement {
-  const layer=Math.floor(index/3),slot=index%3,offset=(slot-1)*BAR.W;
+  const layer=Math.floor(index/3),slot=index%3,offset=(slot-1)*SLOT;
   return {x:tower.x+(layer%2?offset:0),z:tower.z+(layer%2?0:offset),yaw:layer%2?Math.PI/2:0,layer,slot};
 }
 export function eligibleBars(s:Sim):number[] {
@@ -69,10 +72,12 @@ function stepBuild(s:Sim) {
   }
   const p=placement(s.placed,s.tower),b=s.bars[s.active],source=s.source;if(!b||!source)return;
   const support=p.layer===0?0:Math.max(0,...s.bars.filter(item=>item.inTower&&item.layer===p.layer-1).map(item=>item.p[1]+BAR.H/2));
-  const k=s.phaseT/CYCLE,pick:Vec=[source.p[0],source.p[1]+BAR.H/2,source.p[2]],dest:Vec=[p.x,support+BAR.H+.0008,p.z];
+  const k=s.phaseT/CYCLE,pick:Vec=[source.p[0],source.p[1]+BAR.H/2,source.p[2]],dest:Vec=[p.x,support+BAR.H+.003,p.z];
   const lift:Vec=[pick[0],Math.min(maxToolHeight(pick[0],pick[2])-.01,Math.max(pick[1]+.22,dest[1]+.15)),pick[2]];
   const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,dest[1]+.15),dest[2]];
-  animate(s,[[0,lift,source.yaw,false],[.15,pick,source.yaw,false],[.22,pick,source.yaw,true],[.4,lift,source.yaw,true],[.65,above,p.yaw,true],[.8,dest,p.yaw,true],[.85,dest,p.yaw,false],[1,above,p.yaw,false]],k);
+  // Travel at lift height, then descend vertically: a diagonal path would plough through the feed stacks.
+  const over:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,lift[1]),dest[2]];
+  animate(s,[[0,lift,source.yaw,false],[.15,pick,source.yaw,false],[.22,pick,source.yaw,true],[.36,lift,source.yaw,true],[.56,over,p.yaw,true],[.66,above,p.yaw,true],[.8,dest,p.yaw,true],[.85,dest,p.yaw,false],[1,above,p.yaw,false]],k);
   if(s.carry)follow(s,b,smooth((k-.22)/.18));
   if(k>=.85)release(s,b,p,dest[1]);
   if(k>=1-1e-8){s.placed++;s.phaseT=0;s.active=-1;delete s.source;if(s.placed>=s.layers*3){s.phase='remove';}}

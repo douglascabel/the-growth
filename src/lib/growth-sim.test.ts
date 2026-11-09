@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import * as THREE from 'three';
-import {BAR,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,CYCLE,canReach,restartFromPile} from './growth-sim';
+import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,CYCLE,canReach,restartFromPile} from './growth-sim';
 import {createDynamics} from './growth-physics';
 import {normalizeLingot} from './lingot-geometry';
 const advance=(s:ReturnType<typeof createSim>,seconds:number)=>{for(let i=0;i<Math.round(seconds*60);i++)stepSim(s,1/60);};
@@ -14,7 +14,7 @@ describe('reach-limited sculpture',()=>{
  it('seats the robot on the floor',()=>{expect(ROBOT_BASE.y-.003181*ROBOT_SCALE).toBeCloseTo(0,8);});
  it('alternates three parallel bars by 90 degrees',()=>{
    for(let i=0;i<MAX_BARS;i++){const p=placement(i);expect(p.layer).toBe(Math.floor(i/3));expect(p.slot).toBe(i%3);expect(p.yaw).toBe(Math.floor(i/3)%2?Math.PI/2:0);}
-   expect(placement(0).z).toBeCloseTo(.27786,6);expect(placement(2).z).toBeCloseTo(.40214,6);
+   expect(placement(0).z).toBeCloseTo(.34-SLOT,6);expect(placement(2).z).toBeCloseTo(.34+SLOT,6);
  });
  it('stops at the last complete reachable layer',()=>{
    expect(LAYERS).toBe(32);

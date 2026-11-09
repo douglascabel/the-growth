@@ -19,17 +19,15 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   return {reset,settled:()=>quietTime>1.5,step(s,dt){
     for(const [i,b] of s.bars.entries()){
       let body=bodies.get(i);
+      // Recreate on release: a former kinematic body keeps solver state that kicks it on handover.
+      if(body&&!(s.active===i&&s.carry)&&body.bodyType()===RAPIER.RigidBodyType.KinematicPositionBased){world.removeRigidBody(body);bodies.delete(i);body=undefined;}
       if(!body){
-        body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8).setCcdEnabled(true));
+        body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8));
         const collider=(hull?RAPIER.ColliderDesc.convexHull(hull):null)??RAPIER.ColliderDesc.cuboid(BAR.L/2,BAR.H/2,BAR.W/2);
         world.createCollider(collider.setDensity(19300).setFriction(.5).setRestitution(.01),body);bodies.set(i,body);
       }
       if(s.active===i&&s.carry){
         if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
-      }else if(s.phase==='build'&&b.inTower){
-        // Construction support is idealized; all tower bodies become dynamic
-        // together before extraction. Fallen/uncollected bars remain dynamic.
-        if(body.bodyType()!==RAPIER.RigidBodyType.Fixed){body.setBodyType(RAPIER.RigidBodyType.Fixed,true);body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);}
       }else if(body.bodyType()!==RAPIER.RigidBodyType.Dynamic){
         body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);
         body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);
