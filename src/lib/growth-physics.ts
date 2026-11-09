@@ -16,7 +16,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     bodies=new Map();pusher=undefined;quietTime=0;
     world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.7));
   };reset();
-  return {reset,settled:()=>quietTime>1.5,step(s,dt){
+  return {reset,settled:()=>quietTime>1.5,body:(i:number)=>bodies.get(i),step(s,dt){
     for(const [i,b] of s.bars.entries()){
       let body=bodies.get(i);
       if(!body){
