@@ -26,10 +26,6 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       }
       if(s.active===i&&s.carry){
         if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
-      }else if(s.phase==='build'&&b.inTower){
-        // Construction support is idealized; all tower bodies become dynamic
-        // together before extraction. Fallen/uncollected bars remain dynamic.
-        if(body.bodyType()!==RAPIER.RigidBodyType.Fixed){body.setBodyType(RAPIER.RigidBodyType.Fixed,true);body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);}
       }else if(body.bodyType()!==RAPIER.RigidBodyType.Dynamic){
         body.setBodyType(RAPIER.RigidBodyType.Dynamic,true);
         body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);
