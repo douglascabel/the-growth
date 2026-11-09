@@ -20,7 +20,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     for(const [i,b] of s.bars.entries()){
       let body=bodies.get(i);
       if(!body){
-        body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8).setCcdEnabled(true));
+        body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8));
         const collider=(hull?RAPIER.ColliderDesc.convexHull(hull):null)??RAPIER.ColliderDesc.cuboid(BAR.L/2,BAR.H/2,BAR.W/2);
         world.createCollider(collider.setDensity(19300).setFriction(.5).setRestitution(.01),body);bodies.set(i,body);
       }
