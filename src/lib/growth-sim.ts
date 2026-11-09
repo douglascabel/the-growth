@@ -1,5 +1,8 @@
 // Pure choreography. Metres, Y up; physics owns released bar poses.
 export const BAR = { L: .155, W: .06214, H: .04145 };
+// The lingot tapers (bottom ~154 x 61.5 mm, top ~125 x 49 mm). Slots are packed
+// as tight as the bottoms allow so cross bars keep their centre over the next layer.
+export const SLOT = .0617;
 export const ROBOT_SCALE = .55;
 export const ROBOT_BASE = { x: -.32, y: .003181 * ROBOT_SCALE, z: -.28 };
 export const TOWER = { x: .34, z: .34 };
@@ -20,7 +23,7 @@ export type Sim = {
   mode:'pull'|'push'; side:number; push?:{p:Vec;yaw:number}; recoveryHistory:number[];
 };
 export function placement(index:number, tower=TOWER):Placement {
-  const layer=Math.floor(index/3),slot=index%3,offset=(slot-1)*BAR.W;
+  const layer=Math.floor(index/3),slot=index%3,offset=(slot-1)*SLOT;
   return {x:tower.x+(layer%2?offset:0),z:tower.z+(layer%2?0:offset),yaw:layer%2?Math.PI/2:0,layer,slot};
 }
 export function eligibleBars(s:Sim):number[] {
