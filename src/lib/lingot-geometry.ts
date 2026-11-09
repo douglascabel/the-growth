@@ -21,5 +21,9 @@ export function lingotHullPoints(geometry: THREE.BufferGeometry): Float32Array {
     let e = face.edge;
     do { const p = e.head().point; seen.set(`${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`, p); e = e.next; } while (e !== face.edge);
   }
-  return new Float32Array([...seen.values()].flatMap((p) => [p.x, p.y, p.z]));
+  // Rescale into the true bounds (slightly inset) so neighbours never start interpenetrating.
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox!, size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
+  const pts = [...seen.values()], hb = new THREE.Box3().setFromPoints(pts), hs = hb.getSize(new THREE.Vector3()), hc = hb.getCenter(new THREE.Vector3());
+  return new Float32Array(pts.flatMap((p) => [mid.x + (p.x - hc.x) * size.x / hs.x * 0.995, mid.y + (p.y - hc.y) * size.y / hs.y * 0.998, mid.z + (p.z - hc.z) * size.z / hs.z * 0.99]));
 }
