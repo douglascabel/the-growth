@@ -75,7 +75,9 @@ function stepBuild(s:Sim) {
   const k=s.phaseT/CYCLE,pick:Vec=[source.p[0],source.p[1]+BAR.H/2,source.p[2]],dest:Vec=[p.x,support+BAR.H+.003,p.z];
   const lift:Vec=[pick[0],Math.min(maxToolHeight(pick[0],pick[2])-.01,Math.max(pick[1]+.22,dest[1]+.15)),pick[2]];
   const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,dest[1]+.15),dest[2]];
-  animate(s,[[0,lift,source.yaw,false],[.15,pick,source.yaw,false],[.22,pick,source.yaw,true],[.4,lift,source.yaw,true],[.65,above,p.yaw,true],[.8,dest,p.yaw,true],[.85,dest,p.yaw,false],[1,above,p.yaw,false]],k);
+  // Travel at lift height, then descend vertically: a diagonal path would plough through the feed stacks.
+  const over:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,lift[1]),dest[2]];
+  animate(s,[[0,lift,source.yaw,false],[.15,pick,source.yaw,false],[.22,pick,source.yaw,true],[.36,lift,source.yaw,true],[.56,over,p.yaw,true],[.66,above,p.yaw,true],[.8,dest,p.yaw,true],[.85,dest,p.yaw,false],[1,above,p.yaw,false]],k);
   if(s.carry)follow(s,b,smooth((k-.22)/.18));
   if(k>=.85)release(s,b,p,dest[1]);
   if(k>=1-1e-8){s.placed++;s.phaseT=0;s.active=-1;delete s.source;if(s.placed>=s.layers*3){s.phase='remove';}}
