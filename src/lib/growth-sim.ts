@@ -8,19 +8,20 @@ export const ROBOT_BASE = { x: -.32, y: .003181 * ROBOT_SCALE, z: -.28 };
 export const TOWER = { x: .34, z: .34 };
 export const FEED = { x: -.48, y: BAR.H, z: .45 };
 export const CYCLE = 6;
-export const REMOVE_CYCLE = 12;
+export const REMOVE_CYCLE = 18;
 export type Vec = [number, number, number];
 export type Quat = { x:number; y:number; z:number; w:number };
 export type Placement = { x:number; z:number; yaw:number; layer:number; slot:number };
 export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat };
-export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean };
+export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[])=>number|undefined };
 export type Sim = {
-  t:number; phase:'build'|'remove'|'collapse'|'rest'; phaseT:number;
+  t:number; phase:'settle'|'build'|'remove'|'collapse'|'rest'; phaseT:number;
   placed:number; bars:Bar[]; plan:Placement[]; carry:boolean; tool:Vec; toolYaw:number;
   active:number; moves:number; removalHistory:number[]; destination?:Placement;
   physics?:Dynamics; random:()=>number; tower:{x:number;z:number}; layers:number;
   generation:number; source?:{p:Vec;yaw:number;q?:Quat}; released:boolean;
   mode:'pull'|'push'; side:number; push?:{p:Vec;yaw:number}; recoveryHistory:number[];
+  removalScores?:{index:number;stable:boolean;motion:number}[];
 };
 export function placement(index:number, tower=TOWER):Placement {
   const layer=Math.floor(index/3),slot=index%3,offset=(slot-1)*SLOT;
@@ -33,9 +34,36 @@ export function eligibleBars(s:Sim):number[] {
   return s.bars.flatMap((b,i)=>b.inTower&&b.layer<completed?[i]:[]);
 }
 export function createSim(random=Math.random):Sim {
-  return {t:0,phase:'build',phaseT:0,placed:0,bars:Array.from({length:MAX_BARS},(_,i)=>({
-    p:[FEED.x+(Math.floor(i/12)%3)*.19,(i%12+.5)*BAR.H,FEED.z+Math.floor(i/36)*.085],yaw:0,pitch:0,roll:0,visible:true,layer:-1,slot:-1,inTower:false,
-  })),plan:Array.from({length:MAX_BARS},(_,i)=>placement(i)),carry:false,tool:[FEED.x,.7,FEED.z],toolYaw:0,active:-1,moves:0,removalHistory:[],random,tower:{...TOWER},layers:LAYERS,generation:0,released:false,mode:'pull',side:1,recoveryHistory:[]};
+  // A reproducible disorderly heap, already floor-adjacent, with no aligned supply columns.
+  let seed=19371;
+  const noise=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+  const bars:Bar[]=Array.from({length:MAX_BARS},(_,i)=>{
+    const col=i%12,row=Math.floor(i/12),yaw=(noise()-.5)*Math.PI*2;
+    const pitch=(noise()-.5)*.55,roll=(noise()-.5)*.7;
+    const cy=Math.cos(yaw/2),sy=Math.sin(yaw/2),cx=Math.cos(pitch/2),sx=Math.sin(pitch/2),cz=Math.cos(roll/2),sz=Math.sin(roll/2);
+    return {p:[-.85+col*.12+(noise()-.5)*.065,.085+noise()*.08,.18+row*.13+(noise()-.5)*.07],yaw,pitch,roll,
+      q:{x:sx*cy*cz+cx*sy*sz,y:cx*sy*cz-sx*cy*sz,z:cx*cy*sz+sx*sy*cz,w:cx*cy*cz-sx*sy*sz},visible:true,layer:-1,slot:-1,inTower:false};
+  });
+  return {t:0,phase:'settle',phaseT:0,placed:0,bars,plan:Array.from({length:MAX_BARS},(_,i)=>placement(i)),carry:false,tool:[FEED.x,.7,FEED.z],toolYaw:0,active:-1,moves:0,removalHistory:[],random,tower:{...TOWER},layers:LAYERS,generation:0,released:false,mode:'pull',side:1,recoveryHistory:[]};
+}
+/** Support-footprint margin at every layer, including the centre of mass above it. */
+export function supportMargin(s:Sim,exclude:number):number {
+  const remaining=s.bars.flatMap((b,i)=>b.inTower&&i!==exclude?[b]:[]);
+  let margin=Infinity;
+  for(let layer=0;layer<s.layers-1;layer++){
+    const supports=remaining.filter(b=>b.layer===layer),above=remaining.filter(b=>b.layer>layer);
+    if(!above.length)continue;
+    if(!supports.length)return -1;
+    const cx=above.reduce((v,b)=>v+b.p[0],0)/above.length,cz=above.reduce((v,b)=>v+b.p[2],0)/above.length;
+    const hx=layer%2?BAR.W/2:BAR.L/2,hz=layer%2?BAR.L/2:BAR.W/2;
+    const minX=Math.min(...supports.map(b=>b.p[0]-hx)),maxX=Math.max(...supports.map(b=>b.p[0]+hx));
+    const minZ=Math.min(...supports.map(b=>b.p[2]-hz)),maxZ=Math.max(...supports.map(b=>b.p[2]+hz));
+    margin=Math.min(margin,cx-minX,maxX-cx,cz-minZ,maxZ-cz);
+  }
+  return margin;
+}
+export function strategicCandidates(s:Sim):number[] {
+  return eligibleBars(s).sort((a,b)=>supportMargin(s,b)-supportMargin(s,a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
@@ -68,7 +96,7 @@ function stepBuild(s:Sim) {
     candidates.sort((a,b)=>(s.bars[b]?.p[1]??0)-(s.bars[a]?.p[1]??0));
     const i=candidates[0];if(i===undefined){s.phase='remove';s.phaseT=0;return;}
     const bar=s.bars[i];if(!bar)return;s.active=i;rememberSource(s,bar);
-    if(s.generation>0)s.recoveryHistory.push(i);
+    s.recoveryHistory.push(i);
   }
   const p=placement(s.placed,s.tower),b=s.bars[s.active],source=s.source;if(!b||!source)return;
   const support=p.layer===0?0:Math.max(0,...s.bars.filter(item=>item.inTower&&item.layer===p.layer-1).map(item=>item.p[1]+BAR.H/2));
@@ -83,11 +111,14 @@ function stepBuild(s:Sim) {
   if(k>=1-1e-8){s.placed++;s.phaseT=0;s.active=-1;delete s.source;if(s.placed>=s.layers*3){s.phase='remove';}}
 }
 function beginRemoval(s:Sim) {
-  const eligible=eligibleBars(s),i=eligible[Math.min(eligible.length-1,Math.floor(s.random()*eligible.length))];
+  const eligible=strategicCandidates(s),i=s.physics?.chooseRemoval?.(s,eligible)??eligible[0];
   if(i===undefined)return;
   const b=s.bars[i];if(!b)return;
   s.active=i;s.removalHistory.push(i);rememberSource(s,b);
-  s.side=s.random()<.5?-1:1;s.mode=s.random()<.5?'pull':'push';
+  // Work from the accessible end, away from the robot base; randomness only chooses push/pull.
+  const axis:Vec=[Math.cos(b.yaw),0,-Math.sin(b.yaw)];
+  s.side=(b.p[0]-ROBOT_BASE.x)*axis[0]+(b.p[2]-ROBOT_BASE.z)*axis[2]>0?1:-1;
+  s.mode=s.random()<.5?'pull':'push';
   const next=placement(s.placed+s.moves,s.tower);
   // At the reach limit, put extracted bars on the floor rather than overextending.
   s.destination=canReach([next.x,(next.layer+1)*BAR.H+.02,next.z])?next:{x:s.tower.x+s.side*.32,z:s.tower.z-.22,yaw:b.yaw,layer:0,slot:0};
@@ -104,14 +135,16 @@ function stepRemove(s:Sim) {
   const place:Vec=[dest.x,(dest.layer+1)*BAR.H+.0008,dest.z];
   const high=Math.min(maxToolHeight(place[0],place[2])-.02,Math.max(place[1]+.12,pick[1]+.16));
   const pulling=s.mode==='pull';
-  animate(s,[[0,[pick[0]+axis[0]*.24,pick[1]+.15,pick[2]+axis[2]*.24],source.yaw,false],[.15,pulling?end:pushStart,source.yaw,false],[.24,pulling?end:pushStart,source.yaw,pulling],[.55,pulling?[outside[0]+axis[0]*BAR.L*.36,outside[1],outside[2]+axis[2]*BAR.L*.36]:pushed,source.yaw,pulling],[.61,outside,source.yaw,false],[.65,outside,source.yaw,true],[.74,[outside[0],high,outside[2]],source.yaw,true],[.84,[place[0],high,place[2]],dest.yaw,true],[.92,place,dest.yaw,true],[.95,place,dest.yaw,false],[1,[place[0],place[1]+.1,place[2]],dest.yaw,false]],k);
-  if(!pulling&&k>=.24&&k<.55)s.push={p:[s.tool[0],s.tool[1]-BAR.H/2,s.tool[2]],yaw:source.yaw};else delete s.push;
-  if(pulling&&k>=.24&&k<.55){s.carry=true;b.inTower=false;follow(s,b);b.p[0]-=axis[0]*BAR.L*.36;b.p[2]-=axis[2]*BAR.L*.36;}
-  else if(k>=.65&&k<.95){
-    if(!pulling&&k<.67){source.p=[...b.p];}
+  const approach:Vec=[pick[0]+axis[0]*.24,pick[1]+.15,pick[2]+axis[2]*.24];
+  const transit:Vec=[s.tool[0],Math.min(maxToolHeight(s.tool[0],s.tool[2])-.01,Math.max(pick[1]+.25,s.tool[1])),s.tool[2]];
+  animate(s,[[0,transit,source.yaw,false],[.12,approach,source.yaw,false],[.25,pulling?end:pushStart,source.yaw,false],[.32,pulling?end:pushStart,source.yaw,pulling],[.64,pulling?[outside[0]+axis[0]*BAR.L*.36,outside[1],outside[2]+axis[2]*BAR.L*.36]:pushed,source.yaw,pulling],[.69,outside,source.yaw,false],[.72,outside,source.yaw,true],[.79,[outside[0],high,outside[2]],source.yaw,true],[.87,[place[0],high,place[2]],dest.yaw,true],[.94,place,dest.yaw,true],[.97,place,dest.yaw,false],[1,[place[0],place[1]+.1,place[2]],dest.yaw,false]],k);
+  if(!pulling&&k>=.32&&k<.64)s.push={p:[s.tool[0],s.tool[1]-BAR.H/2,s.tool[2]],yaw:source.yaw};else delete s.push;
+  if(pulling&&k>=.32&&k<.64){s.carry=true;follow(s,b);b.p[0]-=axis[0]*BAR.L*.36;b.p[2]-=axis[2]*BAR.L*.36;if(k>.6)b.inTower=false;}
+  else if(k>=.72&&k<.97){
+    if(!pulling&&k<.74){source.p=[...b.p];}
     b.inTower=false;follow(s,b);
   }
-  if(k>=.95){release(s,b,dest);if(dest.layer===0)b.inTower=false;}
+  if(k>=.97){release(s,b,dest);if(dest.layer===0)b.inTower=false;}
   if(k>=1){s.moves++;s.phaseT=0;s.active=-1;delete s.source;delete s.destination;}
 }
 export function chooseNextTower(s:Sim):{x:number;z:number} {
@@ -128,7 +161,12 @@ export function restartFromPile(s:Sim) {
 }
 export function stepSim(s:Sim,dtRaw:number) {
   const dt=Math.max(0,Math.min(dtRaw,.05));if(!dt)return;s.t+=dt;s.phaseT+=dt;
-  if(s.phase==='build')stepBuild(s);else if(s.phase==='remove')stepRemove(s);
+  if(s.phase==='settle'){
+    if(s.phaseT>2&&(s.physics?.settled()??true)){s.phase='build';s.phaseT=0;}
+  }else if(s.phase==='build')stepBuild(s);else if(s.phase==='remove'){
+    // Let released contacts settle before inspecting the next support.
+    if(s.active>=0||s.phaseT>1.5&&(s.physics?.settled()??true))stepRemove(s);
+  }
   const fallen=s.physics?.step(s,dt);
   if(fallen&&(s.phase==='remove'||s.phase==='build')&&s.placed>=6){s.phase='collapse';s.phaseT=0;s.carry=false;s.active=-1;delete s.push;}
   if(s.phase==='collapse'&&s.phaseT>4&&(s.physics?.settled()??true)){s.phase='rest';s.phaseT=0;}
