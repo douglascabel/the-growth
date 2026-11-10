@@ -1,4 +1,7 @@
 # Reach-limited Jenga sculpture
+- [ ] Start from a chaotic, physically settled scatter of the same bars.
+- [ ] Choose careful balance-aware removals instead of random extractions.
+- [ ] Add articulated robot contact bodies and verify collision response and the full loop.
 - [x] Correct 155 × 41.45 × 62.14 mm dimensions and inscription-up placement.
 - [x] Build to the rig's geometric reach limit with multi-side pull/push extraction; construction, extraction and collapse are all physics-driven.
 - [x] Recover settled scattered bars and rebuild beside the pile without resetting them.
