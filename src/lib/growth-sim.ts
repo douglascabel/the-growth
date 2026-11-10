@@ -2,7 +2,7 @@
 export const BAR = { L: .155, W: .06214, H: .04145 };
 // The lingot tapers (bottom ~154 x 61.5 mm, top ~125 x 49 mm). Slots are packed
 // as tight as the bottoms allow so cross bars keep their centre over the next layer.
-export const SLOT = .0617;
+export const SLOT = .028;
 export const ROBOT_SCALE = .55;
 export const ROBOT_BASE = { x: -.32, y: .003181 * ROBOT_SCALE, z: -.28 };
 export const TOWER = { x: .34, z: .34 };
