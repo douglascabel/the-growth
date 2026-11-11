@@ -58,6 +58,11 @@ describe('reach-limited sculpture',()=>{
    const before=structuredClone(s.bars.map(b=>b.p));const selected=s.physics.chooseRemoval?.(s,strategicCandidates(s));
    expect(selected).toBeDefined();expect(s.removalScores?.length).toBeGreaterThan(0);expect(s.bars.map(b=>b.p)).toEqual(before);
  });
+ it('recovers a chaotic start into a standing physical tower without an early restart',async()=>{
+   const s=createSim(()=>.1);s.physics=await createDynamics();advance(s,100);
+   expect(s.generation).toBe(0);expect(s.placed).toBeGreaterThanOrEqual(15);
+   expect(s.bars.filter(b=>b.inTower&&b.p[1]>.15).length).toBeGreaterThan(6);
+ },60000);
  it('preserves the actual fallen poses and bar identities when moving beside the pile',()=>{
    const s=createSim();s.bars.forEach((b,i)=>{b.p=[.34+i*.0001,.03,.34];b.q={x:.7,y:0,z:0,w:.7};});
    const bars=s.bars,poses=structuredClone(bars);restartFromPile(s);

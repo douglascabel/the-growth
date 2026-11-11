@@ -41,7 +41,7 @@ export function createSim(random=Math.random):Sim {
     const col=i%12,row=Math.floor(i/12),yaw=(noise()-.5)*Math.PI*2;
     const pitch=(noise()-.5)*.55,roll=(noise()-.5)*.7;
     const cy=Math.cos(yaw/2),sy=Math.sin(yaw/2),cx=Math.cos(pitch/2),sx=Math.sin(pitch/2),cz=Math.cos(roll/2),sz=Math.sin(roll/2);
-    return {p:[-.85+col*.12+(noise()-.5)*.065,.085+noise()*.08,.18+row*.13+(noise()-.5)*.07],yaw,pitch,roll,
+    return {p:[-.91+col*.085+(noise()-.5)*.04,.085+noise()*.08,.18+row*.11+(noise()-.5)*.05],yaw,pitch,roll,
       q:{x:sx*cy*cz+cx*sy*sz,y:cx*sy*cz-sx*cy*sz,z:cx*cy*sz+sx*sy*cz,w:cx*cy*cz-sx*sy*sz},visible:true,layer:-1,slot:-1,inTower:false};
   });
   return {t:0,phase:'settle',phaseT:0,placed:0,bars,plan:Array.from({length:MAX_BARS},(_,i)=>placement(i)),carry:false,tool:[FEED.x,.7,FEED.z],toolYaw:0,active:-1,moves:0,removalHistory:[],random,tower:{...TOWER},layers:LAYERS,generation:0,released:false,mode:'pull',side:1,recoveryHistory:[]};
