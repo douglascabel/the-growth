@@ -6,9 +6,9 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "The Growth — Filipe Vilas-Boas & Douglas Cabel" },
-      { name: "description", content: "The Growth in a concrete-floor gallery: a robot builds a gold-bar Jenga tower and removes random bars until it falls." },
+      { name: "description", content: "The Growth in a concrete-floor gallery: a robot recovers scattered gold bars, builds a Jenga tower and carefully removes supports until physical collapse." },
       { property: "og:title", content: "The Growth — robotic sculpture" },
-      { property: "og:description", content: "A robotic sculpture builds alternating three-bar layers, removes random bars and starts again after collapse, in a gallery inspired by the installation room." },
+      { property: "og:description", content: "An autonomous robotic sculpture builds alternating gold-bar layers from a fallen pile, tests their balance and starts again after collapse." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],

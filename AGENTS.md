@@ -37,4 +37,6 @@ use the editor.
 - Model the gallery as navigable geometry from the room reference rather than a flat photo backdrop, preserving free orbit and zoom.
 - Derive tower height from the shared rig reach envelope; preserve bar identity and dynamic poses across collapse/recovery, so new towers reuse the actual pile.
 - Normalize supplied lingots through one helper shared with the convex physics hull; the source positive Y face is the embossed top.
-- Tower construction is fully physics-driven (no fixed supports); Rapier gets a decimated convex hull from lingotHullPoints, because full STL hulls stall the page for seconds.
+- Tower construction is fully dynamic with inset cuboid contacts; the tapered artwork remains visual geometry because its narrow top cannot support the requested tall three-bar pattern reliably.
+- Use pure robot-kinematics capsule poses from the OBJ pivot hierarchy for articulated Rapier contacts; exclude only the grasped bar from robot contact so held bars still interact with the tower.
+- Rank removals by support margins and probe Rapier snapshots before extraction; preserve the visible world's poses while choosing the least destabilizing support.
