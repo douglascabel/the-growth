@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import * as THREE from 'three';
-import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,CYCLE,canReach,restartFromPile,strategicCandidates,supportMargin} from './growth-sim';
+import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin} from './growth-sim';
 import {createDynamics} from './growth-physics';
 import {robotContacts} from './robot-kinematics';
 import {normalizeLingot} from './lingot-geometry';
@@ -63,6 +63,12 @@ describe('reach-limited sculpture',()=>{
    expect(s.generation).toBe(0);expect(s.placed).toBeGreaterThanOrEqual(15);
    expect(s.bars.filter(b=>b.inTower&&b.p[1]>.15).length).toBeGreaterThanOrEqual(3);
  },60000);
+ it('builds from real scatter to full reach, removes multiple supports then recovers',async()=>{
+   const s=createSim(()=>.1);s.physics=await createDynamics();const bars=s.bars;
+   advance(s,580);expect(s.phase).toBe('remove');expect(s.placed).toBe(96);expect(s.generation).toBe(0);
+   advance(s,120);expect(s.removalHistory.length).toBeGreaterThanOrEqual(2);expect(s.generation).toBe(1);
+   expect(s.bars).toBe(bars);expect(s.phase).toBe('build');expect(s.recoveryHistory.length).toBeGreaterThan(96);
+ },120000);
  it('preserves the actual fallen poses and bar identities when moving beside the pile',()=>{
    const s=createSim();s.bars.forEach((b,i)=>{b.p=[.34+i*.0001,.03,.34];b.q={x:.7,y:0,z:0,w:.7};});
    const bars=s.bars,poses=structuredClone(bars);restartFromPile(s);
