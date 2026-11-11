@@ -21,8 +21,9 @@ export function robotContacts(tool:Vec,toolYaw:number,carry=false):RobotContact[
   const wrist=add(elbow,ry(rx(sub(RIG.wrist,RIG.elbow),ik.shoulder+ik.elbow),ik.yaw));
   const sh=world(shoulder),el=world(elbow),wr=world(wrist);
   const palm:Vec=[tool[0],tool[1]+.075,tool[2]];
-  const axis:Vec=[Math.sin(toolYaw),0,Math.cos(toolYaw)];
-  const opening=BAR.W/2+(carry?.006:.017);
+  // Grip along the long ends: the narrow gaps between adjacent Jenga bars cannot fit fingers.
+  const axis:Vec=[Math.cos(toolYaw),0,-Math.sin(toolYaw)];
+  const opening=BAR.L/2+(carry?.004:.012);
   return [
     capsule('shoulder',world([0,.16,0]),sh,.075),
     capsule('upper-arm',sh,el,.065),
@@ -30,8 +31,8 @@ export function robotContacts(tool:Vec,toolYaw:number,carry=false):RobotContact[
     capsule('wrist',wr,palm,.027),
     ...[-1,1].map(side=>{
       const a:Vec=[tool[0]+axis[0]*opening*side,tool[1]+.065,tool[2]+axis[2]*opening*side];
-      const b:Vec=[a[0],tool[1]-.025,a[2]];
-      return capsule(`finger-${side}`,a,b,.005);
+      const b:Vec=[a[0],tool[1]+.004,a[2]];
+      return capsule(`finger-${side}`,a,b,.003);
     }),
   ];
 }
