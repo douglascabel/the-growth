@@ -22,12 +22,12 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     const snapshot=world.takeSnapshot();
     const scores:{index:number;stable:boolean;motion:number}[]=[];
     // Probe the actual contact network without moving the visible world or pinning supports.
-    for(const index of candidates){
+    for(const index of candidates.slice(0,4)){
       const original=bodies.get(index);if(!original)continue;
       const probe=RAPIER.World.restoreSnapshot(snapshot);
       const target=probe.getRigidBody(original.handle);if(target)probe.removeRigidBody(target);
       probe.timestep=1/120;
-      for(let n=0;n<90;n++)probe.step();
+      for(let n=0;n<45;n++)probe.step();
       let motion=0,stable=true;
       for(const [i,body] of bodies){
         const b=s.bars[i];if(!b?.inTower||i===index)continue;
@@ -38,7 +38,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         if(displacement>.008||1-2*(q.x*q.x+q.z*q.z)<.96)stable=false;
       }
       probe.free();scores.push({index,stable,motion});
-      // A handful of safe alternatives is enough; unsafe candidates never outrank a safe one.
+      // Bounded lookahead avoids freezing the visitor's scene; support margins shortlist options.
       if(scores.filter(score=>score.stable).length>=3)break;
     }
     scores.sort((a,b)=>Number(b.stable)-Number(a.stable)||a.motion-b.motion);

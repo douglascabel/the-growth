@@ -114,7 +114,7 @@ function beginRemoval(s:Sim) {
   const eligible=strategicCandidates(s),i=s.physics?.chooseRemoval?.(s,eligible)??eligible[0];
   if(i===undefined)return;
   const b=s.bars[i];if(!b)return;
-  s.active=i;s.removalHistory.push(i);rememberSource(s,b);
+  s.active=i;s.phaseT=0;s.removalHistory.push(i);rememberSource(s,b);
   // Work from the accessible end, away from the robot base; randomness only chooses push/pull.
   const axis:Vec=[Math.cos(b.yaw),0,-Math.sin(b.yaw)];
   s.side=(b.p[0]-ROBOT_BASE.x)*axis[0]+(b.p[2]-ROBOT_BASE.z)*axis[2]>0?1:-1;
