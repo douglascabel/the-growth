@@ -11,7 +11,9 @@ describe('reach-limited sculpture',()=>{
  it('preserves the supplied positive-Y inscription face',()=>{
    const g=new THREE.BoxGeometry(155.37,41.45,62.14);const normalized=normalizeLingot(g);normalized.computeBoundingBox();
    const size=normalized.boundingBox?.getSize(new THREE.Vector3());expect(size?.x).toBeCloseTo(.155,6);expect(size?.y).toBeCloseTo(.04145,6);expect(size?.z).toBeCloseTo(.06214,6);
-   const original=g.getAttribute('position'),p=normalized.getAttribute('position');for(let i=0;i<p.count;i++)if(original.getY(i)>0)expect(p.getY(i)).toBeGreaterThan(0);
+   // An apex on +Y must stay on +Y (no flip).
+   const cone=normalizeLingot(new THREE.ConeGeometry(30,40,8)),p=cone.getAttribute('position');let top=0;
+   for(let i=1;i<p.count;i++)if(p.getY(i)>p.getY(top))top=i;expect(Math.hypot(p.getX(top),p.getZ(top))).toBeLessThan(1e-6);
  });
  it('seats the robot on the floor',()=>{expect(ROBOT_BASE.y-.003181*ROBOT_SCALE).toBeCloseTo(0,8);});
  it('alternates three parallel bars by 90 degrees',()=>{
