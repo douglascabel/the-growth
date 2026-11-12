@@ -71,7 +71,10 @@ export function supportMargin(s:Sim,exclude:number):number {
   return margin;
 }
 export function strategicCandidates(s:Sim):number[] {
-  return eligibleBars(s).sort((a,b)=>supportMargin(s,b)-supportMargin(s,a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0));
+  // Prefer bars clamped by at least three loaded layers: lightly loaded bars drag their neighbours along.
+  const all=eligibleBars(s),top=Math.max(0,...all.map(i=>s.bars[i]?.layer??0));
+  const loaded=all.filter(i=>(s.bars[i]?.layer??0)<=top-3);
+  return (loaded.length?loaded:all).sort((a,b)=>supportMargin(s,b)-supportMargin(s,a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
