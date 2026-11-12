@@ -1,4 +1,4 @@
-import { BAR, RIG, ROBOT_BASE, ROBOT_SCALE, solveIK, type Vec, type Quat } from './growth-sim';
+import { END_GRIP, type Grip, RIG, ROBOT_BASE, ROBOT_SCALE, solveIK, type Vec, type Quat } from './growth-sim';
 
 export type RobotContact = { name:string; p:Vec; q:Quat; radius:number; halfHeight:number };
 const add=(a:Vec,b:Vec):Vec=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
@@ -14,16 +14,16 @@ function capsule(name:string,a:Vec,b:Vec,radius:number):RobotContact {
   return {name,p:a.map((x,i)=>(x+(b[i]??0))/2) as Vec,q,radius,halfHeight:length/2};
 }
 /** Same pivot hierarchy as the supplied OBJ, expressed without a renderer. */
-export function robotContacts(tool:Vec,toolYaw:number,carry=false):RobotContact[] {
+export function robotContacts(tool:Vec,toolYaw:number,carry=false,grip:Grip=END_GRIP):RobotContact[] {
   const ik=solveIK(tool,toolYaw);
   const shoulder=ry(sub(RIG.shoulder,RIG.yaw),ik.yaw);
   const elbow=add(shoulder,ry(rx(sub(RIG.elbow,RIG.shoulder),ik.shoulder),ik.yaw));
   const wrist=add(elbow,ry(rx(sub(RIG.wrist,RIG.elbow),ik.shoulder+ik.elbow),ik.yaw));
   const sh=world(shoulder),el=world(elbow),wr=world(wrist);
   const palm:Vec=[tool[0],tool[1]+.075,tool[2]];
-  // Grip along the long ends: the narrow gaps between adjacent Jenga bars cannot fit fingers.
+  // Fingers spread along the gripper's roll axis; the grip decides span and fingertip depth.
   const axis:Vec=[Math.cos(toolYaw),0,-Math.sin(toolYaw)];
-  const opening=BAR.L/2+(carry?.004:.012);
+  const opening=carry?grip.closed:grip.open;
   return [
     capsule('shoulder',world([0,.16,0]),sh,.075),
     capsule('upper-arm',sh,el,.065),
@@ -31,7 +31,7 @@ export function robotContacts(tool:Vec,toolYaw:number,carry=false):RobotContact[
     capsule('wrist',wr,palm,.027),
     ...[-1,1].map(side=>{
       const a:Vec=[tool[0]+axis[0]*opening*side,tool[1]+.065,tool[2]+axis[2]*opening*side];
-      const b:Vec=[a[0],tool[1]+.004,a[2]];
+      const b:Vec=[a[0],tool[1]-grip.depth,a[2]];
       return capsule(`finger-${side}`,a,b,.003);
     }),
   ];

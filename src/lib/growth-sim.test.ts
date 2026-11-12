@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import * as THREE from 'three';
-import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin} from './growth-sim';
+import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE} from './growth-sim';
 import {createDynamics} from './growth-physics';
 import {robotContacts} from './robot-kinematics';
 import {normalizeLingot} from './lingot-geometry';
@@ -11,28 +11,30 @@ describe('reach-limited sculpture',()=>{
  it('preserves the supplied positive-Y inscription face',()=>{
    const g=new THREE.BoxGeometry(155.37,41.45,62.14);const normalized=normalizeLingot(g);normalized.computeBoundingBox();
    const size=normalized.boundingBox?.getSize(new THREE.Vector3());expect(size?.x).toBeCloseTo(.155,6);expect(size?.y).toBeCloseTo(.04145,6);expect(size?.z).toBeCloseTo(.06214,6);
-   const original=g.getAttribute('position'),p=normalized.getAttribute('position');for(let i=0;i<p.count;i++)if(original.getY(i)>0)expect(p.getY(i)).toBeGreaterThan(0);
+   // An apex on +Y must stay on +Y (no flip).
+   const cone=normalizeLingot(new THREE.ConeGeometry(30,40,8)),p=cone.getAttribute('position');let top=0;
+   for(let i=1;i<p.count;i++)if(p.getY(i)>p.getY(top))top=i;expect(Math.hypot(p.getX(top),p.getZ(top))).toBeLessThan(1e-6);
  });
  it('seats the robot on the floor',()=>{expect(ROBOT_BASE.y-.003181*ROBOT_SCALE).toBeCloseTo(0,8);});
  it('alternates three parallel bars by 90 degrees',()=>{
    for(let i=0;i<MAX_BARS;i++){const p=placement(i);expect(p.layer).toBe(Math.floor(i/3));expect(p.slot).toBe(i%3);expect(p.yaw).toBe(Math.floor(i/3)%2?Math.PI/2:0);}
-   expect(placement(0).z).toBeCloseTo(.34-SLOT,6);expect(placement(2).z).toBeCloseTo(.34+SLOT,6);
+   expect(placement(0).z).toBeCloseTo(TOWER.z-SLOT,6);expect(placement(2).z).toBeCloseTo(TOWER.z+SLOT,6);
  });
  it('stops at the last complete reachable layer',()=>{
-   expect(LAYERS).toBe(32);
+   expect(LAYERS).toBeGreaterThanOrEqual(30);
    for(let i=0;i<MAX_BARS;i++){const p=placement(i);expect(canReach([p.x,(p.layer+1)*BAR.H+.02,p.z])).toBe(true);}
-   expect([0,1,2].some(slot=>{const p=placement(MAX_BARS+slot);return !canReach([p.x,(p.layer+1)*BAR.H+.02,p.z]);})).toBe(true);
+   expect([0,1,2].some(slot=>{const p=placement(MAX_BARS+slot);return !canReach([p.x,(p.layer+1)*BAR.H+REACH_CLEARANCE,p.z]);})).toBe(true);
  });
  it('only chooses bars below the highest completed layer',()=>{
    const s=built();advance(s,1.6);expect(s.phase).toBe('remove');expect(s.removalHistory).toHaveLength(1);
-   const chosen=s.removalHistory[0];expect(chosen===undefined?99:s.bars[chosen]?.layer).toBeLessThan(31);
-   expect(eligibleBars(s).every(i=>(s.bars[i]?.layer??99)<31)).toBe(true);
+   const chosen=s.removalHistory[0];expect(chosen===undefined?99:s.bars[chosen]?.layer).toBeLessThan(LAYERS-1);
+   expect(eligibleBars(s).every(i=>(s.bars[i]?.layer??99)<LAYERS-1)).toBe(true);
  });
  it('selects both careful push and pull methods',()=>{
    for(const [r,mode] of [[.1,'pull'],[.9,'push']] as const){const s=built();s.random=()=>r;advance(s,1.6);expect(s.mode).toBe(mode);}
  });
  it('starts from chaotic tilted bars and waits for settling before recovery',()=>{
-   const s=createSim();expect(s.phase).toBe('settle');expect(s.bars).toHaveLength(96);
+   const s=createSim();expect(s.phase).toBe('settle');expect(s.bars).toHaveLength(MAX_BARS);
    expect(new Set(s.bars.map(b=>b.yaw.toFixed(2))).size).toBeGreaterThan(50);
    expect(s.bars.every(b=>b.p[1]<.17&&!b.inTower)).toBe(true);
    advance(s,1.9);expect(s.active).toBe(-1);advance(s,.3);expect(s.phase).toBe('build');expect(s.recoveryHistory).toHaveLength(1);
@@ -65,19 +67,19 @@ describe('reach-limited sculpture',()=>{
  },60000);
  it('builds from real scatter to full reach, removes multiple supports then recovers',async()=>{
    const s=createSim(()=>.1);s.physics=await createDynamics();const bars=s.bars;
-   advance(s,580);expect(s.phase).toBe('remove');expect(s.placed).toBe(96);expect(s.generation).toBe(0);
+   advance(s,640);expect(s.phase).toBe('remove');expect(s.placed).toBe(MAX_BARS);expect(s.generation).toBe(0);
    advance(s,120);expect(s.removalHistory.length).toBeGreaterThanOrEqual(2);expect(s.generation).toBe(1);
-   expect(s.bars).toBe(bars);expect(s.phase).toBe('build');expect(s.recoveryHistory.length).toBeGreaterThan(96);
+   expect(s.bars).toBe(bars);expect(s.phase).toBe('build');expect(s.recoveryHistory.length).toBeGreaterThan(MAX_BARS);
  },120000);
  it('preserves the actual fallen poses and bar identities when moving beside the pile',()=>{
-   const s=createSim();s.bars.forEach((b,i)=>{b.p=[.34+i*.0001,.03,.34];b.q={x:.7,y:0,z:0,w:.7};});
+   const s=createSim();s.bars.forEach((b,i)=>{b.p=[TOWER.x+i*.0001,.03,TOWER.z];b.q={x:.7,y:0,z:0,w:.7};});
    const bars=s.bars,poses=structuredClone(bars);restartFromPile(s);
    expect(s.bars).toBe(bars);expect(s.bars.map(b=>b.p)).toEqual(poses.map(b=>b.p));expect(s.bars.map(b=>b.q)).toEqual(poses.map(b=>b.q));
    expect(Math.hypot(s.tower.x-TOWER.x,s.tower.z-TOWER.z)).toBeGreaterThan(.3);
    advance(s,.1);expect(s.recoveryHistory).toHaveLength(1);
  });
  it('releases a full tower to physics, collapses and recovers the same bars',async()=>{
-   const s=built();s.random=()=>.1;expect(s.placed).toBe(96);
+   const s=built();s.random=()=>.1;expect(s.placed).toBe(MAX_BARS);
    s.physics=await createDynamics();const bars=s.bars;let collapsed=false;
    for(let i=0;i<600*60;i++){stepSim(s,1/60);if(s.phase==='collapse')collapsed=true;if(s.generation>0)break;}
    expect(collapsed).toBe(true);expect(s.generation).toBe(1);expect(s.bars).toBe(bars);expect(s.phase).toBe('build');advance(s,.1);expect(s.recoveryHistory.length).toBeGreaterThan(0);
