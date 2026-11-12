@@ -252,10 +252,12 @@ export function canReach(p:Vec):boolean {
   const d=Math.hypot(forward,h);
   return d<L1+L2-.025&&d>Math.abs(L2-L1)+.01&&p[1]>=0;
 }
+/** Headroom above a placement the wrist needs to descend vertically without straining the reach limit. */
+export const REACH_CLEARANCE=.07;
 export function reachableLayers(tower=TOWER):number {
   let count=0;
   for(let layer=0;layer<100;layer++){
-    if([0,1,2].some(slot=>{const p=placement(layer*3+slot,tower);return !canReach([p.x,(layer+1)*BAR.H+.02,p.z]);}))break;
+    if([0,1,2].some(slot=>{const p=placement(layer*3+slot,tower);return !canReach([p.x,(layer+1)*BAR.H+REACH_CLEARANCE,p.z]);}))break;
     count++;
   }
   return count;

@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import * as THREE from 'three';
-import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin} from './growth-sim';
+import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE} from './growth-sim';
 import {createDynamics} from './growth-physics';
 import {robotContacts} from './robot-kinematics';
 import {normalizeLingot} from './lingot-geometry';
@@ -23,7 +23,7 @@ describe('reach-limited sculpture',()=>{
  it('stops at the last complete reachable layer',()=>{
    expect(LAYERS).toBeGreaterThanOrEqual(30);
    for(let i=0;i<MAX_BARS;i++){const p=placement(i);expect(canReach([p.x,(p.layer+1)*BAR.H+.02,p.z])).toBe(true);}
-   expect([0,1,2].some(slot=>{const p=placement(MAX_BARS+slot);return !canReach([p.x,(p.layer+1)*BAR.H+.02,p.z]);})).toBe(true);
+   expect([0,1,2].some(slot=>{const p=placement(MAX_BARS+slot);return !canReach([p.x,(p.layer+1)*BAR.H+REACH_CLEARANCE,p.z]);})).toBe(true);
  });
  it('only chooses bars below the highest completed layer',()=>{
    const s=built();advance(s,1.6);expect(s.phase).toBe('remove');expect(s.removalHistory).toHaveLength(1);
