@@ -6,4 +6,7 @@
 - [x] Build to the rig's geometric reach limit with multi-side pull/push extraction; construction, extraction and collapse are all physics-driven.
 - [x] Recover settled scattered bars and rebuild beside the pile without resetting them.
 - [x] Pass sixteen sculpture tests plus the routing check; desktop scene renders without runtime errors; do not publish.
-- [x] Desktop visual verification of the physically built tower via scripted capture. Real-device smoothness still unverified (sandbox has no GPU).
+- [x] Desktop visual verification of the physically built tower via scripted capture. Real-device smoothness still unverified (sandbox has no GPU).- [ ] Fix shoulder pivot gap above the robot base.
+- [ ] Fix blank page during deconstruction.
+- [ ] One-hand Jenga removal: push with fingertip tab, pinch protruding end, place on top immediately; never touch the tower otherwise.
+- [ ] Smooth gold bar edges (no faceted triangles).
