@@ -9,7 +9,7 @@ import roughTex from "@/assets/robot_arm_roughness.jpg.asset.json";
 import { ContactShadows, Environment, useTexture, Lightformer, OrbitControls } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { RIG, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
+import { RIG, TAB, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
 import { createDynamics } from "@/lib/growth-physics";
 import { lingotHullPoints, normalizeLingot } from "@/lib/lingot-geometry";
 import GalleryRoom from "./GalleryRoom";
@@ -130,6 +130,18 @@ function Bars({ sim }: { sim: ReturnType<typeof createSim> }) {
   );
 }
 
+const steel = new THREE.MeshStandardMaterial({ color: "#3a3d40", metalness: 0.8, roughness: 0.35 });
+/** Fingertip push tab, visible only while it is in use. */
+function PushTab({ sim }: { sim: ReturnType<typeof createSim> }) {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    const m = ref.current; if (!m) return;
+    m.visible = !!sim.push;
+    if (sim.push) { m.position.set(...sim.push.p); m.rotation.set(0, sim.push.yaw, 0); }
+  });
+  return <mesh ref={ref} material={steel} castShadow><boxGeometry args={[TAB.L, TAB.H, TAB.W]} /></mesh>;
+}
+
 function Stepper({ sim }: { sim: ReturnType<typeof createSim> }) {
   const source = useLoader(STLLoader, lingotAsset.url);
   const geometry = useMemo(() => normalizeLingot(source), [source]);
@@ -193,6 +205,7 @@ function World() {
       <Suspense fallback={null}>
         <Robot sim={sim} />
         <Bars sim={sim} />
+        <PushTab sim={sim} />
         <Stepper sim={sim} />
       </Suspense>
 

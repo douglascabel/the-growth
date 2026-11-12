@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BAR, type Dynamics } from './growth-sim';
+import { BAR, TAB, type Dynamics } from './growth-sim';
 import { robotContacts } from './robot-kinematics';
 let ready:Promise<void>|undefined;
 export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
@@ -22,12 +22,12 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     const snapshot=world.takeSnapshot();
     const scores:{index:number;stable:boolean;motion:number}[]=[];
     // Probe the actual contact network without moving the visible world or pinning supports.
-    for(const index of candidates.slice(0,4)){
+    for(const index of candidates.slice(0,3)){
       const original=bodies.get(index);if(!original)continue;
       const probe=RAPIER.World.restoreSnapshot(snapshot);
       const target=probe.getRigidBody(original.handle);if(target)probe.removeRigidBody(target);
       probe.timestep=1/120;
-      for(let n=0;n<45;n++)probe.step();
+      for(let n=0;n<30;n++)probe.step();
       let motion=0,stable=true;
       for(const [i,body] of bodies){
         const b=s.bars[i];if(!b?.inTower||i===index)continue;
@@ -64,7 +64,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       // A grasped bar still contacts the tower, but not its own fingers or links.
       body.collider(0).setCollisionGroups(s.active===i&&s.carry?0x00020001:0x00010005);
     }
-    const contacts=robotContacts(s.tool,s.toolYaw,s.carry);
+    const contacts=robotContacts(s.tool,s.toolYaw,s.carry,s.grip);
     if(!robot.length){
       for(const contact of contacts){
         const body=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...contact.p).setRotation(contact.q));
@@ -75,7 +75,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     const robotStarts=robot.map(body=>({p:body.translation(),q:body.rotation()}));
     // Pushes transfer force through contact; the target remains fully dynamic.
     if(s.push){
-      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(.009,BAR.H*.32,BAR.W*.27).setFriction(.4),pusher);}
+      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(TAB.L/2,TAB.H/2,TAB.W/2).setFriction(.4),pusher);}
     }else if(pusher){world.removeRigidBody(pusher);pusher=undefined;}
     // Fixed substeps keep stacking and contact independent of render frame rate.
     const steps=Math.max(1,Math.ceil(dt/(1/120)));world.timestep=dt/steps;
