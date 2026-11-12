@@ -18,7 +18,7 @@ describe('reach-limited sculpture',()=>{
  it('seats the robot on the floor',()=>{expect(ROBOT_BASE.y-.003181*ROBOT_SCALE).toBeCloseTo(0,8);});
  it('alternates three parallel bars by 90 degrees',()=>{
    for(let i=0;i<MAX_BARS;i++){const p=placement(i);expect(p.layer).toBe(Math.floor(i/3));expect(p.slot).toBe(i%3);expect(p.yaw).toBe(Math.floor(i/3)%2?Math.PI/2:0);}
-   expect(placement(0).z).toBeCloseTo(.34-SLOT,6);expect(placement(2).z).toBeCloseTo(.34+SLOT,6);
+   expect(placement(0).z).toBeCloseTo(TOWER.z-SLOT,6);expect(placement(2).z).toBeCloseTo(TOWER.z+SLOT,6);
  });
  it('stops at the last complete reachable layer',()=>{
    expect(LAYERS).toBeGreaterThanOrEqual(30);
@@ -72,7 +72,7 @@ describe('reach-limited sculpture',()=>{
    expect(s.bars).toBe(bars);expect(s.phase).toBe('build');expect(s.recoveryHistory.length).toBeGreaterThan(MAX_BARS);
  },120000);
  it('preserves the actual fallen poses and bar identities when moving beside the pile',()=>{
-   const s=createSim();s.bars.forEach((b,i)=>{b.p=[.34+i*.0001,.03,.34];b.q={x:.7,y:0,z:0,w:.7};});
+   const s=createSim();s.bars.forEach((b,i)=>{b.p=[TOWER.x+i*.0001,.03,TOWER.z];b.q={x:.7,y:0,z:0,w:.7};});
    const bars=s.bars,poses=structuredClone(bars);restartFromPile(s);
    expect(s.bars).toBe(bars);expect(s.bars.map(b=>b.p)).toEqual(poses.map(b=>b.p));expect(s.bars.map(b=>b.q)).toEqual(poses.map(b=>b.q));
    expect(Math.hypot(s.tower.x-TOWER.x,s.tower.z-TOWER.z)).toBeGreaterThan(.3);

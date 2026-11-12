@@ -5,7 +5,9 @@ export const BAR = { L: .155, W: .06214, H: .04145 };
 export const SLOT = .0635;
 export const ROBOT_SCALE = .55;
 export const ROBOT_BASE = { x: -.32, y: .003181 * ROBOT_SCALE, z: -.28 };
-export const TOWER = { x: .34, z: .34 };
+// The tower sits on a robot axis so one bar orientation always runs sideways to the arm:
+// both of its ends are reachable without the arm crossing over the tower.
+export const TOWER = { x: ROBOT_BASE.x + .9, z: ROBOT_BASE.z };
 export const FEED = { x: -.48, y: BAR.H, z: .45 };
 export const CYCLE = 6;
 export const REMOVE_CYCLE = 18;
@@ -70,9 +72,14 @@ export function supportMargin(s:Sim,exclude:number):number {
   }
   return margin;
 }
+/** True when a bar runs across the arm's line of sight, so both ends are reachable beside the tower. */
+export function lateral(p:Vec,yaw:number):boolean {
+  const dx=p[0]-ROBOT_BASE.x,dz=p[2]-ROBOT_BASE.z,n=Math.hypot(dx,dz)||1;
+  return Math.abs((Math.cos(yaw)*dx-Math.sin(yaw)*dz)/n)<.35;
+}
 export function strategicCandidates(s:Sim):number[] {
   // Prefer bars clamped by at least three loaded layers: lightly loaded bars drag their neighbours along.
-  const all=eligibleBars(s),top=Math.max(0,...all.map(i=>s.bars[i]?.layer??0));
+  const all=eligibleBars(s).filter(i=>{const b=s.bars[i];return !!b&&lateral(b.p,b.yaw);}),top=Math.max(0,...all.map(i=>s.bars[i]?.layer??0));
   const loaded=all.filter(i=>(s.bars[i]?.layer??0)<=top-3);
   return (loaded.length?loaded:all).sort((a,b)=>supportMargin(s,b)-supportMargin(s,a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0));
 }
@@ -177,9 +184,9 @@ function stepRemove(s:Sim) {
   }
 }
 export function chooseNextTower(s:Sim):{x:number;z:number} {
-  const candidates=[{x:-.12,z:.34},{x:.34,z:-.12},{x:.34,z:.34},{x:-.12,z:.65}];
+  const r=.9,candidates=[[1,0],[0,1],[-1,0],[0,-1]].map(([x,z])=>({x:ROBOT_BASE.x+(x??0)*r,z:ROBOT_BASE.z+(z??0)*r}));
   return candidates.filter(p=>Math.hypot(p.x-s.tower.x,p.z-s.tower.z)>.3)
-    .sort((a,b)=>clearance(b,s)-clearance(a,s))[0]??{x:-.12,z:.34};
+    .sort((a,b)=>clearance(b,s)-clearance(a,s))[0]??{...TOWER};
 }
 function clearance(p:{x:number;z:number},s:Sim){return Math.min(...s.bars.map(b=>Math.hypot(p.x-b.p[0],p.z-b.p[2])));}
 export function restartFromPile(s:Sim) {

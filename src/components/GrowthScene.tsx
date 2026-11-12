@@ -210,7 +210,7 @@ function World() {
       </Suspense>
 
       <OrbitControls
-        target={[0, 0.65, 0.15]} enableDamping dampingFactor={0.08}
+        target={[0.13, 0.65, -0.28]} enableDamping dampingFactor={0.08}
         minDistance={0.6} maxDistance={12} maxPolarAngle={Math.PI / 2 - 0.03}
         autoRotate autoRotateSpeed={0.35}
       />
@@ -224,7 +224,7 @@ export default function GrowthScene() {
       <Canvas
         shadows
         dpr={[1, 2]}
-        camera={{ position: [2.25, 1.4, 2.9], fov: 42, near: 0.05, far: 60 }}
+        camera={{ position: [1.4, 1.4, 2.6], fov: 42, near: 0.05, far: 60 }}
         gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       >
         <World />
