@@ -161,18 +161,16 @@ function stepRemove(s:Sim) {
   const next=placement(s.placed+s.moves,s.tower);
   const toTop=canReach([next.x,(next.layer+1)*BAR.H+.02,next.z]);
   const floor:Vec=[pulled[0],BAR.H+.0008,pulled[2]];
-  const cradle:Vec=toTop?[pulled[0],Math.min(maxToolHeight(pulled[0],pulled[2])-.01,roof),pulled[2]]:floor;
-  animate(s,[[0,source.entry,yaw,false],[.06,transit,yaw,false],[.13,hi(out),yaw,false],[.2,out,yaw,false],[.25,contact,yaw,false],[.45,pushed,yaw,false],[.49,out,yaw,false],[.53,hi(out),yaw,false],[.6,hi(grab),yaw,false],[.66,grab,yaw,false],[.69,grab,yaw,true],[.8,pulled,yaw,true],[.9,toTop?cradle:hi(pulled),yaw,true],[.96,toTop?cradle:floor,yaw,true],[.98,toTop?cradle:floor,yaw,!toTop],[1,toTop?cradle:hi(floor),yaw,!toTop]],k);
+  // Set the pinched bar down clear of the tower, then re-grip it by its ends for the top (neighbours leave no room for a side pinch).
+  animate(s,[[0,source.entry,yaw,false],[.06,transit,yaw,false],[.13,hi(out),yaw,false],[.2,out,yaw,false],[.25,contact,yaw,false],[.45,pushed,yaw,false],[.49,out,yaw,false],[.53,hi(out),yaw,false],[.6,hi(grab),yaw,false],[.66,grab,yaw,false],[.69,grab,yaw,true],[.8,pulled,yaw,true],[.92,floor,yaw,true],[.96,floor,yaw,false],[1,hi(floor),yaw,false]],k);
   s.grip=k<.53?PUSH_GRIP:PINCH_GRIP;
   if(k>=.13&&k<.53)s.push={p:[s.tool[0]+axis[0]*TAB.L/2,s.tool[1]-s.grip.depth,s.tool[2]+axis[2]*TAB.L/2],yaw:source.yaw};else delete s.push;
-  if(s.carry){follow(s,b,1,-Math.PI/2,(BAR.L/2-.02)*-s.side);if(k>.75)b.inTower=false;}
-  if(k>=.97&&!toTop){b.inTower=false;s.released=true;}
+  if(s.carry){follow(s,b,1,-Math.PI/2,(BAR.L/2-.02)*s.side);if(k>.75)b.inTower=false;}
+  if(k>=.96)b.inTower=false;
   if(k>=1){
     s.phaseT=0;delete s.grab;delete s.push;
-    if(toTop){s.restack=s.active;s.source={p:[...b.p],entry:[...s.tool],yaw:source.yaw,q:{x:0,y:Math.sin(source.yaw/2),z:0,w:Math.cos(source.yaw/2)}};
-      // Hand over to the end-grip placement without letting go mid-air.
-      s.phaseT=CYCLE*.22;}
-    else{s.active=-1;delete s.source;}
+    if(toTop)s.restack=s.active;
+    s.active=-1;delete s.source;
   }
 }
 export function chooseNextTower(s:Sim):{x:number;z:number} {
