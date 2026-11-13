@@ -19,10 +19,10 @@ export const END_GRIP:Grip={open:BAR.L/2+.012,closed:BAR.L/2+.004,depth:-.004};
 export const PINCH_GRIP:Grip={open:BAR.W/2+.012,closed:BAR.W/2+.002,depth:BAR.H*.5};
 export const PUSH_GRIP:Grip={open:.004,closed:.004,depth:BAR.H*.5};
 /** Horizontal fingertip tab: lets a downward gripper push a bar end recessed below the cross layers. */
-export const TAB = { L:.085, H:BAR.H*.64, W:.012 };
+export const TAB = { L:.2, H:BAR.H*.64, W:.012 };
 export type Placement = { x:number; z:number; yaw:number; layer:number; slot:number };
-export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat };
-export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[])=>number|undefined };
+export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat; loose?:boolean };
+export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[])=>number|undefined; armClear?:(tool:Vec,yaw:number,box:{min:Vec;max:Vec})=>boolean };
 export type Sim = {
   t:number; phase:'settle'|'build'|'remove'|'collapse'|'rest'; phaseT:number;
   placed:number; bars:Bar[]; plan:Placement[]; carry:boolean; tool:Vec; toolYaw:number;
@@ -81,7 +81,10 @@ export function strategicCandidates(s:Sim):number[] {
   // Prefer bars clamped by at least three loaded layers: lightly loaded bars drag their neighbours along.
   const all=eligibleBars(s).filter(i=>{const b=s.bars[i];return !!b&&lateral(b.p,b.yaw);}),top=Math.max(0,...all.map(i=>s.bars[i]?.layer??0));
   const loaded=all.filter(i=>(s.bars[i]?.layer??0)<=top-3);
-  return (loaded.length?loaded:all).sort((a,b)=>supportMargin(s,b)-supportMargin(s,a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0));
+  // Shallow bars first: the push must overcome friction from the load above, and a deep push tips the whole tower.
+  const margin=(i:number)=>supportMargin(s,i)>.01?1:0;
+  const loose=(i:number)=>s.bars[i]?.loose?1:0;
+  return (loaded.length?loaded:all).sort((a,b)=>margin(b)-margin(a)||loose(b)-loose(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
@@ -103,10 +106,16 @@ function follow(s:Sim,b:Bar,u=1,yawOffset=0,along=0) {
   }else b.q=target;
 }
 function rememberSource(s:Sim,b:Bar) {s.source={p:[...b.p],entry:[...s.tool],yaw:b.q?Math.atan2(2*(b.q.w*b.q.y+b.q.x*b.q.z),1-2*(b.q.y*b.q.y+b.q.z*b.q.z)):b.yaw,...(b.q?{q:{...b.q}}:{})};s.released=false;}
+/** Real bars vary in height: in each layer the outer bar nearest the robot is a hair thinner, so it carries no load. */
+export function isLoose(tower:{x:number;z:number},p:Placement):boolean {
+  // Only in every other layer: a looser tower leans over the missing contacts.
+  const d=p.layer%2?ROBOT_BASE.x-tower.x:ROBOT_BASE.z-tower.z;
+  return Math.abs(d)>.05&&Math.floor(p.layer/2)%2===0&&p.slot===(d<0?0:2);
+}
 function release(s:Sim,b:Bar,p:Placement,toolY=(p.layer+1)*BAR.H+.0008) {
   if(s.released)return;
   b.p=[p.x,toolY-BAR.H/2,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};
-  b.layer=p.layer;b.slot=p.slot;b.inTower=true;s.released=true;
+  b.layer=p.layer;b.slot=p.slot;b.inTower=true;s.released=true;b.loose=isLoose(s.tower,p);
 }
 function stepBuild(s:Sim) {
   if(s.active<0){
@@ -134,16 +143,33 @@ function placeActive(s:Sim,p:Placement,done:()=>void) {
   if(k>=.85)release(s,b,p,dest[1]);
   if(k>=1-1e-8){s.phaseT=0;s.active=-1;delete s.source;done();}
 }
+/** Tool poses of the push-then-pinch extraction, shared by planning and choreography. */
+export const PUSH_STROKE=.085;
+function extractionPoses(b:Bar,side:number):Vec[] {
+  const a:Vec=[Math.cos(b.yaw)*side,0,-Math.sin(b.yaw)*side],y=b.p[1]+BAR.H/2;
+  const at=(d:number):Vec=>[b.p[0]+a[0]*d,y,b.p[2]+a[2]*d],reach=BAR.L/2+TAB.L,grab=PUSH_STROKE+BAR.L/2-.012;
+  return [at(-reach),at(-(reach-PUSH_STROKE)),at(grab),at(grab+.14)];
+}
 function beginRemoval(s:Sim) {
-  const eligible=strategicCandidates(s),i=s.physics?.chooseRemoval?.(s,eligible)??eligible[0];
+  // Only extractions where the arm never leans over the tower: one hand touches one bar.
+  const tower=s.bars.filter(b=>b.inTower);
+  const box={min:[Math.min(...tower.map(b=>b.p[0]))-ENVELOPE,0,Math.min(...tower.map(b=>b.p[2]))-ENVELOPE] as Vec,
+    max:[Math.max(...tower.map(b=>b.p[0]))+ENVELOPE,Math.max(...tower.map(b=>b.p[1]))+BAR.H,Math.max(...tower.map(b=>b.p[2]))+ENVELOPE] as Vec};
+  const sides=new Map<number,number[]>();
+  for(const i of strategicCandidates(s)){
+    const b=s.bars[i];if(!b)continue;
+    const ok=[1,-1].filter(side=>!s.physics?.armClear||extractionPoses(b,side).every(p=>s.physics?.armClear?.(p,b.yaw+Math.PI/2,box)));
+    if(ok.length)sides.set(i,ok);
+  }
+  // When no careful move remains, the robot still plays, and that last bar brings the tower down.
+  const eligible=sides.size?[...sides.keys()]:strategicCandidates(s);
+  const i=s.physics?.chooseRemoval?.(s,eligible)??eligible[0];
   if(i===undefined)return;
   const b=s.bars[i];if(!b)return;
   s.active=i;s.phaseT=0;s.removalHistory.push(i);rememberSource(s,b);delete s.grab;
-  // Randomness chooses which end faces the push: 'pull' pinches on the robot side, 'push' pushes toward the far side.
-  const axis:Vec=[Math.cos(b.yaw),0,-Math.sin(b.yaw)];
+  const ok=sides.get(i)??[1,-1];
   s.mode=s.random()<.5?'pull':'push';
-  const toward=(b.p[0]-ROBOT_BASE.x)*axis[0]+(b.p[2]-ROBOT_BASE.z)*axis[2]>0?1:-1;
-  s.side=s.mode==='push'?toward:-toward;
+  s.side=ok.length>1?(s.mode==='push'?1:-1):(ok[0]??1);
 }
 /** Tower envelope half-width: cross layers stick out beyond a bar's own end face. */
 const ENVELOPE=SLOT+BAR.W/2;
@@ -161,9 +187,9 @@ function stepRemove(s:Sim) {
   const roof=Math.max(...s.bars.filter(x=>x.inTower).map(x=>x.p[1]+BAR.H/2))+.12;
   const hi=(v:Vec):Vec=>[v[0],Math.min(maxToolHeight(v[0],v[2])-.01,roof),v[2]];
   // One hand only: a closed fingertip tab pushes the bar part-way, then the protruding end is pinched.
-  const reach=BAR.L/2+TAB.L,stroke=.06;
+  const reach=BAR.L/2+TAB.L,stroke=PUSH_STROKE;
   const out=at(c,-(reach+.03)),contact=at(c,-reach),pushed=at(c,-(reach-stroke));
-  if(!s.carry||!s.grab){const live:Vec=[b.p[0],b.p[1]+BAR.H/2,b.p[2]];s.grab=at(live,BAR.L/2-.02);}
+  if(!s.carry||!s.grab){const live:Vec=[b.p[0],b.p[1]+BAR.H/2,b.p[2]];s.grab=at(live,BAR.L/2-.012);}
   const grab=s.grab,pulled=at(grab,.14);
   const transit:Vec=[source.entry[0],Math.min(maxToolHeight(source.entry[0],source.entry[2])-.01,Math.max(roof,source.entry[1])),source.entry[2]];
   const yaw=source.yaw+Math.PI/2;
@@ -175,7 +201,7 @@ function stepRemove(s:Sim) {
   animate(s,[[0,source.entry,yaw,false],[.06,transit,yaw,false],[.13,hi(out),yaw,false],[.2,out,yaw,false],[.25,contact,yaw,false],[.45,pushed,yaw,false],[.49,out,yaw,false],[.53,hi(out),yaw,false],[.6,hi(grab),yaw,false],[.66,grab,yaw,false],[.69,grab,yaw,true],[.8,pulled,yaw,true],[.92,floor,yaw,true],[.96,floor,yaw,false],[1,hi(floor),yaw,false]],k);
   s.grip=k<.53?PUSH_GRIP:PINCH_GRIP;
   if(k>=.13&&k<.53)s.push={p:[s.tool[0]+axis[0]*TAB.L/2,s.tool[1]-s.grip.depth,s.tool[2]+axis[2]*TAB.L/2],yaw:source.yaw};else delete s.push;
-  if(s.carry){follow(s,b,1,-Math.PI/2,(BAR.L/2-.02)*s.side);if(k>.75)b.inTower=false;}
+  if(s.carry){follow(s,b,1,-Math.PI/2,(BAR.L/2-.012)*s.side);if(k>.75)b.inTower=false;}
   if(k>=.96)b.inTower=false;
   if(k>=1){
     s.phaseT=0;delete s.grab;delete s.push;

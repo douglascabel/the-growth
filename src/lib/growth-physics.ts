@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { BAR, TAB, type Dynamics } from './growth-sim';
-import { robotContacts } from './robot-kinematics';
+import { armClear, robotContacts } from './robot-kinematics';
 let ready:Promise<void>|undefined;
 export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   ready??=RAPIER.init();await ready;
@@ -18,7 +18,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     bodies=new Map();pusher=undefined;quietTime=0;robot=[];
     world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.7));
   };reset();
-  return {reset,settled:()=>quietTime>1.5,chooseRemoval(s,candidates){
+  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box)=>armClear(tool,yaw,box),chooseRemoval(s,candidates){
     const snapshot=world.takeSnapshot();
     const scores:{index:number;stable:boolean;motion:number}[]=[];
     // Probe the actual contact network without moving the visible world or pinning supports.
@@ -51,8 +51,9 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       if(body&&!(s.active===i&&s.carry)&&body.bodyType()===RAPIER.RigidBodyType.KinematicPositionBased){world.removeRigidBody(body);bodies.delete(i);body=undefined;}
       if(!body){
         body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8).setCcdEnabled(true));
-        const collider=RAPIER.ColliderDesc.cuboid(BAR.L/2*.98,BAR.H/2*.95,BAR.W/2*.96);
-        world.createCollider(collider.setDensity(19300).setFriction(.5).setRestitution(.01),body);bodies.set(i,body);
+        // Real bars vary slightly in height: a bar a hair thinner carries no load, the loose block Jenga players test for.
+        const collider=RAPIER.ColliderDesc.cuboid(BAR.L/2*.98,BAR.H/2*(b.inTower&&b.loose?.86:.95),BAR.W/2*.96);
+        world.createCollider(collider.setDensity(19300).setFriction(.32).setRestitution(.01),body);bodies.set(i,body);
       }
       if(s.active===i&&s.carry){
         if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
