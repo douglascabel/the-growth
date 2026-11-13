@@ -81,7 +81,9 @@ export function strategicCandidates(s:Sim):number[] {
   // Prefer bars clamped by at least three loaded layers: lightly loaded bars drag their neighbours along.
   const all=eligibleBars(s).filter(i=>{const b=s.bars[i];return !!b&&lateral(b.p,b.yaw);}),top=Math.max(0,...all.map(i=>s.bars[i]?.layer??0));
   const loaded=all.filter(i=>(s.bars[i]?.layer??0)<=top-3);
-  return (loaded.length?loaded:all).sort((a,b)=>supportMargin(s,b)-supportMargin(s,a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0));
+  // Shallow bars first: the push must overcome friction from the load above, and a deep push tips the whole tower.
+  const margin=(i:number)=>supportMargin(s,i)>.01?1:0;
+  return (loaded.length?loaded:all).sort((a,b)=>margin(b)-margin(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
