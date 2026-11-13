@@ -83,7 +83,8 @@ export function strategicCandidates(s:Sim):number[] {
   const loaded=all.filter(i=>(s.bars[i]?.layer??0)<=top-3);
   // Shallow bars first: the push must overcome friction from the load above, and a deep push tips the whole tower.
   const margin=(i:number)=>supportMargin(s,i)>.01?1:0;
-  return (loaded.length?loaded:all).sort((a,b)=>margin(b)-margin(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
+  const loose=(i:number)=>s.bars[i]?.slot===1?1:0;
+  return (loaded.length?loaded:all).sort((a,b)=>margin(b)-margin(a)||loose(b)-loose(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
