@@ -108,8 +108,9 @@ function follow(s:Sim,b:Bar,u=1,yawOffset=0,along=0) {
 function rememberSource(s:Sim,b:Bar) {s.source={p:[...b.p],entry:[...s.tool],yaw:b.q?Math.atan2(2*(b.q.w*b.q.y+b.q.x*b.q.z),1-2*(b.q.y*b.q.y+b.q.z*b.q.z)):b.yaw,...(b.q?{q:{...b.q}}:{})};s.released=false;}
 /** Real bars vary in height: in each layer the outer bar nearest the robot is a hair thinner, so it carries no load. */
 export function isLoose(tower:{x:number;z:number},p:Placement):boolean {
+  // Only in every other layer: a looser tower leans over the missing contacts.
   const d=p.layer%2?ROBOT_BASE.x-tower.x:ROBOT_BASE.z-tower.z;
-  return Math.abs(d)<.05?p.slot===1:p.slot===(d<0?0:2);
+  return Math.abs(d)>.05&&Math.floor(p.layer/2)%2===0&&p.slot===(d<0?0:2);
 }
 function release(s:Sim,b:Bar,p:Placement,toolY=(p.layer+1)*BAR.H+.0008) {
   if(s.released)return;
