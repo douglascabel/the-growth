@@ -1,11 +1,11 @@
 import {describe,expect,it} from 'vitest';
 import * as THREE from 'three';
-import {BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE} from './growth-sim';
+import {isLoose,BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE} from './growth-sim';
 import {createDynamics} from './growth-physics';
 import {robotContacts} from './robot-kinematics';
 import {normalizeLingot} from './lingot-geometry';
 const advance=(s:ReturnType<typeof createSim>,seconds:number)=>{for(let i=0;i<Math.round(seconds*60);i++)stepSim(s,1/60);};
-const built=()=>{const s=createSim();s.phase='remove';s.placed=MAX_BARS;s.bars.forEach((b,i)=>{const p=placement(i);b.p=[p.x,(p.layer+.5)*BAR.H*.95,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};b.layer=p.layer;b.slot=p.slot;b.inTower=true;});return s;};
+const built=()=>{const s=createSim();s.phase='remove';s.placed=MAX_BARS;s.bars.forEach((b,i)=>{const p=placement(i);b.p=[p.x,(p.layer+.5)*BAR.H*.95,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};b.layer=p.layer;b.slot=p.slot;b.inTower=true;b.loose=isLoose(TOWER,p);});return s;};
 describe('reach-limited sculpture',()=>{
  it('uses 155 × 41.45 × 62.14 mm',()=>{expect(BAR).toEqual({L:.155,H:.04145,W:.06214});});
  it('preserves the supplied positive-Y inscription face',()=>{

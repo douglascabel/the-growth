@@ -51,8 +51,8 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       if(body&&!(s.active===i&&s.carry)&&body.bodyType()===RAPIER.RigidBodyType.KinematicPositionBased){world.removeRigidBody(body);bodies.delete(i);body=undefined;}
       if(!body){
         body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8).setCcdEnabled(true));
-        // Real bars vary slightly in height: a middle bar a hair thinner carries no load, the loose block Jenga players test for.
-        const collider=RAPIER.ColliderDesc.cuboid(BAR.L/2*.98,BAR.H/2*(b.inTower&&b.slot===1?.86:.95),BAR.W/2*.96);
+        // Real bars vary slightly in height: a bar a hair thinner carries no load, the loose block Jenga players test for.
+        const collider=RAPIER.ColliderDesc.cuboid(BAR.L/2*.98,BAR.H/2*(b.inTower&&b.loose?.86:.95),BAR.W/2*.96);
         world.createCollider(collider.setDensity(19300).setFriction(.32).setRestitution(.01),body);bodies.set(i,body);
       }
       if(s.active===i&&s.carry){

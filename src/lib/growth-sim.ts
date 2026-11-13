@@ -21,7 +21,7 @@ export const PUSH_GRIP:Grip={open:.004,closed:.004,depth:BAR.H*.5};
 /** Horizontal fingertip tab: lets a downward gripper push a bar end recessed below the cross layers. */
 export const TAB = { L:.2, H:BAR.H*.64, W:.012 };
 export type Placement = { x:number; z:number; yaw:number; layer:number; slot:number };
-export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat };
+export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat; loose?:boolean };
 export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[])=>number|undefined; armClear?:(tool:Vec,yaw:number,box:{min:Vec;max:Vec})=>boolean };
 export type Sim = {
   t:number; phase:'settle'|'build'|'remove'|'collapse'|'rest'; phaseT:number;
@@ -83,7 +83,7 @@ export function strategicCandidates(s:Sim):number[] {
   const loaded=all.filter(i=>(s.bars[i]?.layer??0)<=top-3);
   // Shallow bars first: the push must overcome friction from the load above, and a deep push tips the whole tower.
   const margin=(i:number)=>supportMargin(s,i)>.01?1:0;
-  const loose=(i:number)=>s.bars[i]?.slot===1?1:0;
+  const loose=(i:number)=>s.bars[i]?.loose?1:0;
   return (loaded.length?loaded:all).sort((a,b)=>margin(b)-margin(a)||loose(b)-loose(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
@@ -106,10 +106,15 @@ function follow(s:Sim,b:Bar,u=1,yawOffset=0,along=0) {
   }else b.q=target;
 }
 function rememberSource(s:Sim,b:Bar) {s.source={p:[...b.p],entry:[...s.tool],yaw:b.q?Math.atan2(2*(b.q.w*b.q.y+b.q.x*b.q.z),1-2*(b.q.y*b.q.y+b.q.z*b.q.z)):b.yaw,...(b.q?{q:{...b.q}}:{})};s.released=false;}
+/** Real bars vary in height: in each layer the outer bar nearest the robot is a hair thinner, so it carries no load. */
+export function isLoose(tower:{x:number;z:number},p:Placement):boolean {
+  const toward=p.layer%2?Math.sign(ROBOT_BASE.x-tower.x):Math.sign(ROBOT_BASE.z-tower.z);
+  return p.slot===(toward<0?0:2)||(toward===0&&p.slot===1);
+}
 function release(s:Sim,b:Bar,p:Placement,toolY=(p.layer+1)*BAR.H+.0008) {
   if(s.released)return;
   b.p=[p.x,toolY-BAR.H/2,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};
-  b.layer=p.layer;b.slot=p.slot;b.inTower=true;s.released=true;
+  b.layer=p.layer;b.slot=p.slot;b.inTower=true;s.released=true;b.loose=isLoose(s.tower,p);
 }
 function stepBuild(s:Sim) {
   if(s.active<0){
