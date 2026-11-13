@@ -19,7 +19,7 @@ export const END_GRIP:Grip={open:BAR.L/2+.012,closed:BAR.L/2+.004,depth:-.004};
 export const PINCH_GRIP:Grip={open:BAR.W/2+.012,closed:BAR.W/2+.002,depth:BAR.H*.5};
 export const PUSH_GRIP:Grip={open:.004,closed:.004,depth:BAR.H*.5};
 /** Horizontal fingertip tab: lets a downward gripper push a bar end recessed below the cross layers. */
-export const TAB = { L:.085, H:BAR.H*.64, W:.012 };
+export const TAB = { L:.2, H:BAR.H*.64, W:.012 };
 export type Placement = { x:number; z:number; yaw:number; layer:number; slot:number };
 export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat };
 export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[])=>number|undefined };
@@ -161,9 +161,9 @@ function stepRemove(s:Sim) {
   const roof=Math.max(...s.bars.filter(x=>x.inTower).map(x=>x.p[1]+BAR.H/2))+.12;
   const hi=(v:Vec):Vec=>[v[0],Math.min(maxToolHeight(v[0],v[2])-.01,roof),v[2]];
   // One hand only: a closed fingertip tab pushes the bar part-way, then the protruding end is pinched.
-  const reach=BAR.L/2+TAB.L,stroke=.06;
+  const reach=BAR.L/2+TAB.L,stroke=.085;
   const out=at(c,-(reach+.03)),contact=at(c,-reach),pushed=at(c,-(reach-stroke));
-  if(!s.carry||!s.grab){const live:Vec=[b.p[0],b.p[1]+BAR.H/2,b.p[2]];s.grab=at(live,BAR.L/2-.02);}
+  if(!s.carry||!s.grab){const live:Vec=[b.p[0],b.p[1]+BAR.H/2,b.p[2]];s.grab=at(live,BAR.L/2-.012);}
   const grab=s.grab,pulled=at(grab,.14);
   const transit:Vec=[source.entry[0],Math.min(maxToolHeight(source.entry[0],source.entry[2])-.01,Math.max(roof,source.entry[1])),source.entry[2]];
   const yaw=source.yaw+Math.PI/2;
@@ -175,7 +175,7 @@ function stepRemove(s:Sim) {
   animate(s,[[0,source.entry,yaw,false],[.06,transit,yaw,false],[.13,hi(out),yaw,false],[.2,out,yaw,false],[.25,contact,yaw,false],[.45,pushed,yaw,false],[.49,out,yaw,false],[.53,hi(out),yaw,false],[.6,hi(grab),yaw,false],[.66,grab,yaw,false],[.69,grab,yaw,true],[.8,pulled,yaw,true],[.92,floor,yaw,true],[.96,floor,yaw,false],[1,hi(floor),yaw,false]],k);
   s.grip=k<.53?PUSH_GRIP:PINCH_GRIP;
   if(k>=.13&&k<.53)s.push={p:[s.tool[0]+axis[0]*TAB.L/2,s.tool[1]-s.grip.depth,s.tool[2]+axis[2]*TAB.L/2],yaw:source.yaw};else delete s.push;
-  if(s.carry){follow(s,b,1,-Math.PI/2,(BAR.L/2-.02)*s.side);if(k>.75)b.inTower=false;}
+  if(s.carry){follow(s,b,1,-Math.PI/2,(BAR.L/2-.012)*s.side);if(k>.75)b.inTower=false;}
   if(k>=.96)b.inTower=false;
   if(k>=1){
     s.phaseT=0;delete s.grab;delete s.push;
