@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { BAR, TAB, type Dynamics } from './growth-sim';
-import { robotContacts } from './robot-kinematics';
+import { armClear, robotContacts } from './robot-kinematics';
 let ready:Promise<void>|undefined;
 export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   ready??=RAPIER.init();await ready;
@@ -18,7 +18,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     bodies=new Map();pusher=undefined;quietTime=0;robot=[];
     world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.7));
   };reset();
-  return {reset,settled:()=>quietTime>1.5,chooseRemoval(s,candidates){
+  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box)=>armClear(tool,yaw,box),chooseRemoval(s,candidates){
     const snapshot=world.takeSnapshot();
     const scores:{index:number;stable:boolean;motion:number}[]=[];
     // Probe the actual contact network without moving the visible world or pinning supports.

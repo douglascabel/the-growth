@@ -36,3 +36,15 @@ export function robotContacts(tool:Vec,toolYaw:number,carry=false,grip:Grip=END_
     }),
   ];
 }
+/** True when the arm links (not the fingers) stay clear of an axis-aligned box around the tower. */
+export function armClear(tool:Vec,toolYaw:number,box:{min:Vec;max:Vec},margin=.01):boolean {
+  for(const c of robotContacts(tool,toolYaw).slice(0,4)){
+    const {x,y,z,w}=c.q,d:Vec=[2*(x*y-w*z),1-2*(x*x+z*z),2*(y*z+w*x)];
+    for(let i=0;i<=12;i++){
+      const t=(i/6-1)*c.halfHeight,p=c.p.map((v,j)=>v+(d[j]??0)*t);
+      const gap=Math.hypot(...p.map((v,j)=>Math.max((box.min[j]??0)-v,0,v-(box.max[j]??0))));
+      if(gap<c.radius+margin)return false;
+    }
+  }
+  return true;
+}
