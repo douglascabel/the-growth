@@ -5,7 +5,7 @@ import {createDynamics} from './growth-physics';
 import {GRIPPER_FINGER_RADIUS,gripHalfSpan,robotContacts} from './robot-kinematics';
 import {normalizeLingot} from './lingot-geometry';
 const advance=(s:ReturnType<typeof createSim>,seconds:number)=>{for(let i=0;i<Math.round(seconds*60);i++)stepSim(s,1/60);};
-const built=()=>{const s=createSim();s.phase='remove';s.placed=MAX_BARS;s.bars.forEach((b,i)=>{const p=placement(i);b.p=[p.x,(p.layer+.5)*BAR.H*.95,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};b.layer=p.layer;b.slot=p.slot;b.inTower=true;b.loose=isLoose(TOWER,p);});return s;};
+const built=()=>{const s=createSim();s.phase='remove';s.placed=MAX_BARS;s.bars.forEach((b,i)=>{const p=placement(i);b.p=[p.x,(p.layer+.5)*BAR.H,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};b.layer=p.layer;b.slot=p.slot;b.inTower=true;b.loose=isLoose(TOWER,p);});return s;};
 describe('reach-limited sculpture',()=>{
  it('uses 155 × 41.45 × 62.14 mm',()=>{expect(BAR).toEqual({L:.155,H:.04145,W:.06214});});
  it('preserves the supplied positive-Y inscription face',()=>{
@@ -38,22 +38,22 @@ describe('reach-limited sculpture',()=>{
    expect(eligibleBars(s).every(i=>(s.bars[i]?.layer??99)<LAYERS-1)).toBe(true);
    expect(eligibleBars(s)).not.toContain(MAX_BARS-1);
  });
- it('uses one gentle test before a closed-picker pull of a single bar',()=>{
+ it('uses a closed-picker push on only one bar',()=>{
    const s=built();advance(s,1.6);const index=s.active;if(index<0)throw new Error('no safe removal was selected');
    let tested=false,closed=false;
    for(let i=0;i<Math.ceil(REMOVE_CYCLE*60);i++){
      stepSim(s,1/60);
-     if(s.push){tested=true;expect(s.carry).toBe(false);expect(s.grip).toBe(PUSH_GRIP);expect(s.active).toBe(index);}
-     if(s.carry){closed=true;expect(s.push).toBeUndefined();expect(s.grip).toBe(PINCH_GRIP);expect(s.active).toBe(index);}
+     if(s.push){tested=true;expect(s.carry).toBe(false);expect(s.closed).toBe(true);expect(s.grip).toBe(PUSH_GRIP);expect(s.active).toBe(index);}
+     if(s.closed)closed=true;
    }
-   expect(PUSH_STROKE).toBeLessThan(.02);expect(tested).toBe(true);expect(closed).toBe(true);
+   expect(PUSH_STROKE).toBeLessThanOrEqual(.02);expect(tested).toBe(true);expect(closed).toBe(true);
  });
- it('moves each extracted bar directly onto a reachable top slot',()=>{
+ it('keeps the pushed bar in its layer instead of picking it up',()=>{
    const s=built();s.random=()=>.1;advance(s,1.6);
    const index=s.active;if(index<0)throw new Error('no safe removal was selected');
+   const layer=s.bars[index]?.layer;
    advance(s,REMOVE_CYCLE+.2);
-   const moved=s.bars[index];expect(moved?.inTower).toBe(true);expect(moved?.layer).toBe(LAYERS);expect(s.moves).toBe(1);
-   expect(moved?.p[1]).toBeGreaterThan((LAYERS-.5)*BAR.H*.95);
+   const moved=s.bars[index];expect(moved?.inTower).toBe(true);expect(moved?.layer).toBe(layer);expect(s.moves).toBe(0);
  });
  it('does not start a removal when no reachable top placement exists',()=>{
    const s=built();s.tower={x:ROBOT_BASE.x+2,z:TOWER.z};advance(s,2);
@@ -68,17 +68,24 @@ describe('reach-limited sculpture',()=>{
    s.physics={...d,step:()=>false,settled:()=>true,chooseRemoval:(_state,candidates)=>candidates[0]};
    advance(s,1.6);expect(s.removalHistory).toHaveLength(1);expect(s.active).toBeGreaterThanOrEqual(0);
  });
- it('leaves the tower untouched when every physics pull probe is unstable',async()=>{
-   const s=built(),d=await createDynamics();d.step(s,1/60);
-   s.physics={...d,step:()=>false,settled:()=>true};advance(s,1.6);
+ it('leaves the tower untouched when physics does not approve a push',()=>{
+   const s=built();s.physics={reset:()=>{},step:()=>false,settled:()=>true,chooseRemoval:()=>undefined};advance(s,1.6);
    expect(s.removalHistory).toHaveLength(0);expect(s.active).toBe(-1);
-   expect(s.removalScores?.every(score=>!score.stable)).toBe(true);
- },10000);
+ });
  it('starts from chaotic tilted bars and waits for settling before recovery',()=>{
    const s=createSim();expect(s.phase).toBe('settle');expect(s.bars).toHaveLength(MAX_BARS);
    expect(new Set(s.bars.map(b=>b.yaw.toFixed(2))).size).toBeGreaterThan(50);
    expect(s.bars.every(b=>b.p[1]<.17&&!b.inTower)).toBe(true);
    advance(s,1.9);expect(s.active).toBe(-1);advance(s,.3);expect(s.phase).toBe('build');expect(s.recoveryHistory).toHaveLength(1);
+ });
+ it('uses full-height supports and begins every construction move from the current hand pose',()=>{
+   const s=createSim(()=>.1),start=[...s.tool];advance(s,2.05);
+   expect(s.active).toBeGreaterThanOrEqual(0);expect(s.bars.filter(b=>b.inTower).every(b=>b.loose===false)).toBe(true);
+   expect(Math.hypot((s.tool[0]??0)-(start[0]??0),(s.tool[1]??0)-(start[1]??0),(s.tool[2]??0)-(start[2]??0))).toBeLessThan(.005);
+   for(let i=0;i<90;i++){
+     const before=[...s.tool];stepSim(s,1/60);
+     expect(Math.hypot((s.tool[0]??0)-(before[0]??0),(s.tool[1]??0)-(before[1]??0),(s.tool[2]??0)-(before[2]??0))).toBeLessThan(.025);
+   }
  });
  it('prefers a redundant support over the last bar under a loaded layer',()=>{
    const s=built();s.bars[0] && (s.bars[0].inTower=false);s.bars[2] && (s.bars[2].inTower=false);

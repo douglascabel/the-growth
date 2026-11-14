@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BAR, TAB, type Dynamics } from './growth-sim';
+import { BAR, type Dynamics } from './growth-sim';
 import { armClear, armClearMany, robotContacts } from './robot-kinematics';
 let ready:Promise<void>|undefined;
 export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
@@ -10,8 +10,8 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   let quietTime=0;
   let robot:RAPIER.RigidBody[]=[];
   const reset=()=>{
-    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=40;
-    world.integrationParameters.contact_natural_frequency=60;
+    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=72;
+    world.integrationParameters.contact_natural_frequency=80;
     world.integrationParameters.lengthUnit=.1;
     world.integrationParameters.normalizedAllowedLinearError=.0005;
     world.integrationParameters.normalizedPredictionDistance=.01;
@@ -37,16 +37,15 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         }
       };
       moving.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
-      // Probe the selected bar with the same tower contacts used during its pull.
-      moving.collider(0).setCollisionGroups(bar.loose?0x00020000:0x00020001);
+      // Probe the selected bar with the same short closed-hand push used live.
+      moving.collider(0).setCollisionGroups(0x00020001);
       const start=moving.translation(),side=routes.find(route=>route.index===index)?.side??1,yaw=bar.yaw;
-      const end={x:start.x+Math.cos(yaw)*side*.14,y:start.y,z:start.z-Math.sin(yaw)*side*.14};
+      const end={x:start.x+Math.cos(yaw)*side*.018,y:start.y,z:start.z-Math.sin(yaw)*side*.018};
       pulled.timestep=1/120;
       for(let n=1;n<=240;n++){
         const u=n/240;moving.setNextKinematicTranslation({x:start.x+(end.x-start.x)*u,y:start.y,z:start.z+(end.z-start.z)*u});
         pulled.step();observe();
       }
-      pulled.removeRigidBody(moving);
       for(let n=0;n<120;n++){pulled.step();observe();}
       pulled.free();
       scores.push({index,stable,motion});
@@ -64,10 +63,10 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
       // Recreate on release: a former kinematic body keeps solver state that kicks it on handover.
       if(body&&!(s.active===i&&s.carry)&&body.bodyType()===RAPIER.RigidBodyType.KinematicPositionBased){world.removeRigidBody(body);bodies.delete(i);body=undefined;}
       if(!body){
-        body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.5).setAngularDamping(.8).setCcdEnabled(true));
-        // Real bars vary slightly in height: a bar a hair thinner carries no load, the loose block Jenga players test for.
-        const collider=RAPIER.ColliderDesc.cuboid(BAR.L/2*.98,BAR.H/2*(b.inTower&&b.loose?.86:.95),BAR.W/2*.96);
-        world.createCollider(collider.setDensity(19300).setFriction(.32).setRestitution(.01),body);bodies.set(i,body);
+        body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.85).setAngularDamping(1.2).setCcdEnabled(true));
+        // Uniform, nearly full-size contact hulls keep each three-bar story level.
+        const collider=RAPIER.ColliderDesc.cuboid(BAR.L/2*.985,BAR.H/2*.99,BAR.W/2*.985);
+        world.createCollider(collider.setDensity(19300).setFriction(.62).setRestitution(.005),body);bodies.set(i,body);
       }
       if(s.active===i&&s.carry){
         if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
@@ -86,7 +85,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         s.carry?0x00020001:b.inTower?0x00020005:0x00020004;
       body.collider(0).setCollisionGroups(groups);
     }
-    const contacts=robotContacts(s.tool,s.toolYaw,s.carry,s.grip);
+    const contacts=robotContacts(s.tool,s.toolYaw,s.carry||s.closed,s.grip);
     if(!robot.length){
       for(const contact of contacts){
         const body=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...contact.p).setRotation(contact.q));
@@ -104,7 +103,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     const robotStarts=robot.map(body=>({p:body.translation(),q:body.rotation()}));
     // Pushes transfer force through contact; the target remains fully dynamic.
     if(s.push){
-      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(TAB.L/2,TAB.H/2,TAB.W/2).setFriction(.4).setCollisionGroups(0x00040002),pusher);}
+      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(.007,BAR.H*.3,BAR.W*.38).setFriction(.62).setCollisionGroups(0x00040002),pusher);}
     }else if(pusher){world.removeRigidBody(pusher);pusher=undefined;}
     // Fixed substeps keep stacking and contact independent of render frame rate.
     const steps=Math.max(1,Math.ceil(dt/(1/120)));world.timestep=dt/steps;

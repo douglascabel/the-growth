@@ -208,7 +208,7 @@ function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
     el.current.rotation.x = ik.elbow;
     wr.current.rotation.x = ik.wrist;
     roll.current.rotation.y = ik.roll;
-    const close = sim.carry ? GRIPPER_CLOSE_TRAVEL : 0;
+    const close = (sim.carry || sim.closed) ? GRIPPER_CLOSE_TRAVEL : 0;
     f1.current.position.x = close;
     f2.current.position.x = -close;
   });
@@ -261,12 +261,12 @@ function Bars({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometry: 
 }
 
 const steel = new THREE.MeshStandardMaterial({ color: "#3a3d40", metalness: 0.8, roughness: 0.35 });
-/** Fingertip push tab, visible only while it is in use. */
+/** The contact surface belongs to the closed hand; it is not separate visible tooling. */
 function PushTab({ sim }: { sim: ReturnType<typeof createSim> }) {
   const ref = useRef<THREE.Mesh>(null);
   useFrame(() => {
     const m = ref.current; if (!m) return;
-    m.visible = !!sim.push;
+    m.visible = false;
     if (sim.push) { m.position.set(...sim.push.p); m.rotation.set(0, sim.push.yaw, 0); }
   });
   return <mesh ref={ref} material={steel} castShadow><boxGeometry args={[TAB.L, TAB.H, TAB.W]} /></mesh>;
