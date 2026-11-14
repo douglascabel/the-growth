@@ -33,7 +33,9 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
           const other=pulled.getRigidBody(body.handle);if(!other)continue;
           const p=other.translation(),q=other.rotation(),displacement=Math.hypot(p.x-b.p[0],p.y-b.p[1],p.z-b.p[2]);
           motion=Math.max(motion,displacement);
-          if(displacement>.008||1-2*(q.x*q.x+q.z*q.z)<.96)stable=false;
+          // A short push may settle adjacent bars by a few millimetres.  Reject
+          // only a meaningful shift or lean, which is the onset of a fall.
+          if(displacement>.06||1-2*(q.x*q.x+q.z*q.z)<.82)stable=false;
         }
       };
       moving.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);

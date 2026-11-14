@@ -5,7 +5,7 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { MeshoptSimplifier } from "three/examples/jsm/libs/meshopt_simplifier.module.js";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { ContactShadows, Environment, Lightformer, OrbitControls } from "@react-three/drei";
+import { ContactShadows, Environment, Lightformer, OrbitControls, useTexture } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GRIPPER_CLOSE_TRAVEL, RIG, TAB, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
@@ -35,7 +35,6 @@ function useConcreteTexture() {
   }, []);
 }
 
-const gold = new THREE.MeshPhysicalMaterial({ color: "#e8b13b", metalness: 0.96, roughness: 0.22, clearcoat: 0.32, clearcoatRoughness: 0.18 });
 const modelBase = `${import.meta.env.BASE_URL}models/`;
 const robotObjUrl = `${modelBase}robot-arm/industrial-robot-arm.obj`;
 const goldBarObjUrl = `${modelBase}gold-bar/gold-bar.obj`;
@@ -45,6 +44,31 @@ const robotTextureUrls = [
   `${modelBase}robot-arm/robot-normal.png`,
   `${modelBase}robot-arm/robot-roughness.png`,
 ];
+const goldTextureUrls = [
+  `${modelBase}gold-bar/material/color.jpg`,
+  `${modelBase}gold-bar/material/normal.jpg`,
+  `${modelBase}gold-bar/material/roughness.jpg`,
+  `${modelBase}gold-bar/material/metalness.jpg`,
+] as string[];
+
+function useGoldMaterial() {
+  const textures = useTexture(goldTextureUrls) as THREE.Texture[];
+  const [map, normalMap, roughnessMap, metalnessMap] = textures;
+  const colorMap = map!, normal = normalMap!, roughness = roughnessMap!, metalness = metalnessMap!;
+  return useMemo(() => {
+    colorMap.colorSpace = THREE.SRGBColorSpace;
+    for (const texture of [colorMap, normal, roughness, metalness]) {
+      texture.anisotropy = 8;
+    }
+    return new THREE.MeshPhysicalMaterial({
+      // The supplied metal maps provide surface detail; this tint gives the
+      // material its gold alloy colour without an invented procedural texture.
+      color: "#d9a625", map: colorMap, normalMap: normal, roughnessMap: roughness, metalnessMap: metalness,
+      normalScale: new THREE.Vector2(.5, .5), metalness: 1, roughness: .28,
+      clearcoat: .08, clearcoatRoughness: .22,
+    });
+  }, [colorMap, normal, roughness, metalness]);
+}
 
 function useOptionalRobot() {
   const [object, setObject] = useState<THREE.Group | null>(null);
@@ -240,6 +264,7 @@ function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
 }
 
 function Bars({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometry: THREE.BufferGeometry }) {
+  const material = useGoldMaterial();
   const instances = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   useFrame(() => {
@@ -256,7 +281,7 @@ function Bars({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometry: 
     mesh.instanceMatrix.needsUpdate = true;
   });
   return (
-    <instancedMesh ref={instances} args={[geometry, gold, MAX_BARS]} castShadow receiveShadow frustumCulled={false} />
+    <instancedMesh ref={instances} args={[geometry, material, MAX_BARS]} castShadow receiveShadow frustumCulled={false} />
   );
 }
 

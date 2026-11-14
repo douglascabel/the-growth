@@ -68,6 +68,11 @@ describe('reach-limited sculpture',()=>{
    s.physics={...d,step:()=>false,settled:()=>true,chooseRemoval:(_state,candidates)=>candidates[0]};
    advance(s,1.6);expect(s.removalHistory).toHaveLength(1);expect(s.active).toBeGreaterThanOrEqual(0);
  });
+ it('starts a physics-approved closed-hand push instead of parking at deconstruction',async()=>{
+   const s=built(),d=await createDynamics();d.step(s,1/60);s.physics={...d,step:()=>false,settled:()=>true};
+   advance(s,1.6);
+   expect(s.removalHistory).toHaveLength(1);expect(s.active).toBeGreaterThanOrEqual(0);
+ });
  it('leaves the tower untouched when physics does not approve a push',()=>{
    const s=built();s.physics={reset:()=>{},step:()=>false,settled:()=>true,chooseRemoval:()=>undefined};advance(s,1.6);
    expect(s.removalHistory).toHaveLength(0);expect(s.active).toBe(-1);

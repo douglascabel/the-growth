@@ -87,13 +87,12 @@ export function lateral(p:Vec,yaw:number):boolean {
   return Math.abs((Math.cos(yaw)*dx-Math.sin(yaw)*dz)/n)<.35;
 }
 export function strategicCandidates(s:Sim):number[] {
-  // Prefer bars clamped by at least three loaded layers: lightly loaded bars drag their neighbours along.
   const all=eligibleBars(s).filter(i=>{const b=s.bars[i];return !!b&&lateral(b.p,b.yaw);}),top=Math.max(0,...all.map(i=>s.bars[i]?.layer??0));
-  const loaded=all.filter(i=>(s.bars[i]?.layer??0)<=top-3);
-  // Shallow bars first: the push must overcome friction from the load above, and a deep push tips the whole tower.
+  // Start just below the protected top story.  A short push there has far less
+  // load above it than a deep support, while the completed top remains intact.
   const margin=(i:number)=>supportMargin(s,i)>.01?1:0;
   const loose=(i:number)=>s.bars[i]?.loose?1:0;
-  return (loaded.length?loaded:all).sort((a,b)=>margin(b)-margin(a)||loose(b)-loose(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
+  return all.sort((a,b)=>margin(b)-margin(a)||loose(b)-loose(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
@@ -218,7 +217,9 @@ function stepRemove(s:Sim) {
   if(s.active<0){
     if(s.phaseT<s.nextRemovalCheck)return;
     beginRemoval(s);
-    if(s.active<0)s.nextRemovalCheck=s.phaseT+15;
+    // Retry soon after normal contact settling instead of leaving the arm parked
+    // at the construction handoff when a candidate is temporarily unavailable.
+    if(s.active<0)s.nextRemovalCheck=s.phaseT+2;
     else s.nextRemovalCheck=0;
   }
   const b=s.bars[s.active],source=s.source;if(!b||!source)return;
