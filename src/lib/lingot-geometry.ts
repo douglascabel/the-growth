@@ -4,14 +4,15 @@ import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js';
 import { BAR } from './growth-sim';
 
 // Supplied STL: +X length, +Y embossed top, +Z width. Do not rotate X.
-export function normalizeLingot(source:THREE.BufferGeometry) {
+export function normalizeLingot(source:THREE.BufferGeometry,preserveNormals=false) {
   const g=source.clone();g.computeBoundingBox();
   const bounds=g.boundingBox;if(!bounds)return g;
   const size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3());
   g.translate(-center.x,-center.y,-center.z);
   g.scale(BAR.L/size.x,BAR.H/size.y,BAR.W/size.z);
-  // Smooth shading across bevels, hard only at real edges: flat STL normals show every triangle up close.
-  g.deleteAttribute('normal');return toCreasedNormals(mergeVertices(g,1e-6),Math.PI/5);
+  // Preserve precomputed normals for dense GLB meshes; rebuild OBJ/fallback normals with crisp bar edges.
+  if(preserveNormals&&g.getAttribute('normal'))return g;
+  g.deleteAttribute('normal');return toCreasedNormals(mergeVertices(g,1e-6),Math.PI/3);
 }
 /** Unique convex-hull corner points; full STL vertex sets make Rapier hulls extremely slow. */
 export function lingotHullPoints(geometry: THREE.BufferGeometry): Float32Array {
@@ -30,3 +31,4 @@ export function lingotHullPoints(geometry: THREE.BufferGeometry): Float32Array {
   const pts = [...seen.values()], hb = new THREE.Box3().setFromPoints(pts), hs = hb.getSize(new THREE.Vector3()), hc = hb.getCenter(new THREE.Vector3());
   return new Float32Array(pts.flatMap((p) => [mid.x + (p.x - hc.x) * size.x / hs.x * 0.995, mid.y + (p.y - hc.y) * size.y / hs.y * 0.998, mid.z + (p.z - hc.z) * size.z / hs.z * 0.99]));
 }
+

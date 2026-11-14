@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { BAR, TAB, type Dynamics } from './growth-sim';
-import { armClear, robotContacts } from './robot-kinematics';
+import { armClear, armClearMany, robotContacts } from './robot-kinematics';
 let ready:Promise<void>|undefined;
 export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   ready??=RAPIER.init();await ready;
@@ -18,32 +18,46 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     bodies=new Map();pusher=undefined;quietTime=0;robot=[];
     world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.7));
   };reset();
-  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box)=>armClear(tool,yaw,box),chooseRemoval(s,candidates){
+  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box)=>armClear(tool,yaw,box),armClearMany:(tool,yaw,boxes)=>armClearMany(tool,yaw,boxes),chooseRemoval(s,candidates,routes=[]){
     const snapshot=world.takeSnapshot();
     const scores:{index:number;stable:boolean;motion:number}[]=[];
     // Probe the actual contact network without moving the visible world or pinning supports.
     for(const index of candidates.slice(0,3)){
       const original=bodies.get(index);if(!original)continue;
-      const probe=RAPIER.World.restoreSnapshot(snapshot);
-      const target=probe.getRigidBody(original.handle);if(target)probe.removeRigidBody(target);
-      probe.timestep=1/120;
-      for(let n=0;n<30;n++)probe.step();
+      const pulled=RAPIER.World.restoreSnapshot(snapshot),moving=pulled.getRigidBody(original.handle),bar=s.bars[index];
+      if(!moving||!bar){pulled.free();continue;}
       let motion=0,stable=true;
-      for(const [i,body] of bodies){
-        const b=s.bars[i];if(!b?.inTower||i===index)continue;
-        const other=probe.getRigidBody(body.handle);if(!other)continue;
-        const p=other.translation(),q=other.rotation();
-        const displacement=Math.hypot(p.x-b.p[0],p.y-b.p[1],p.z-b.p[2]);
-        motion=Math.max(motion,displacement);
-        if(displacement>.008||1-2*(q.x*q.x+q.z*q.z)<.96)stable=false;
+      const observe=()=>{
+        for(const [i,body] of bodies){
+          const b=s.bars[i];if(!b?.inTower||i===index)continue;
+          const other=pulled.getRigidBody(body.handle);if(!other)continue;
+          const p=other.translation(),q=other.rotation(),displacement=Math.hypot(p.x-b.p[0],p.y-b.p[1],p.z-b.p[2]);
+          motion=Math.max(motion,displacement);
+          if(displacement>.008||1-2*(q.x*q.x+q.z*q.z)<.96)stable=false;
+        }
+      };
+      moving.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
+      // Probe the selected bar with the same tower contacts used during its pull.
+      moving.collider(0).setCollisionGroups(bar.loose?0x00020000:0x00020001);
+      const start=moving.translation(),side=routes.find(route=>route.index===index)?.side??1,yaw=bar.yaw;
+      const end={x:start.x+Math.cos(yaw)*side*.14,y:start.y,z:start.z-Math.sin(yaw)*side*.14};
+      pulled.timestep=1/120;
+      for(let n=1;n<=240;n++){
+        const u=n/240;moving.setNextKinematicTranslation({x:start.x+(end.x-start.x)*u,y:start.y,z:start.z+(end.z-start.z)*u});
+        pulled.step();observe();
       }
-      probe.free();scores.push({index,stable,motion});
-      // Bounded lookahead avoids freezing the visitor's scene; support margins shortlist options.
-      if(scores.filter(score=>score.stable).length>=3)break;
+      pulled.removeRigidBody(moving);
+      for(let n=0;n<120;n++){pulled.step();observe();}
+      pulled.free();
+      scores.push({index,stable,motion});
     }
-    scores.sort((a,b)=>Number(b.stable)-Number(a.stable)||a.motion-b.motion);
+    const rank=new Map(candidates.map((index,position)=>[index,position]));
+    scores.sort((a,b)=>Number(b.stable)-Number(a.stable)||
+      (Math.abs(a.motion-b.motion)<.002?(rank.get(a.index)??Infinity)-(rank.get(b.index)??Infinity):a.motion-b.motion));
     s.removalScores=scores;
-    return scores[0]?.index;
+    // Do not turn a known-unstable probe into a live extraction. The tower remains
+    // untouched until another bar has a stable route.
+    return scores.find(score=>score.stable)?.index;
   },step(s,dt){
     for(const [i,b] of s.bars.entries()){
       let body=bodies.get(i);
@@ -62,21 +76,35 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);
         body.setLinvel({x:0,y:0,z:0},true);body.setAngvel({x:0,y:0,z:0},true);
       }
-      // A grasped bar still contacts the tower, but not its own fingers or links.
-      body.collider(0).setCollisionGroups(s.active===i&&s.carry?0x00020001:0x00010005);
+      // Keep established placement contacts during construction. In deconstruction,
+      // isolate the selected bar so only its own hand and the tower can touch it.
+      const selected=s.active===i;
+      // Before grip closure only the small test tab can touch the selected bar.
+      // Once closed, the carried bar stays physical against the tower but ignores
+      // the robot colliders because its kinematic pose is the closed picker hold.
+      const groups=!selected?0x00010007:s.phase!=='remove'?0x00020001:
+        s.carry?0x00020001:b.inTower?0x00020005:0x00020004;
+      body.collider(0).setCollisionGroups(groups);
     }
     const contacts=robotContacts(s.tool,s.toolYaw,s.carry,s.grip);
     if(!robot.length){
       for(const contact of contacts){
         const body=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...contact.p).setRotation(contact.q));
-        world.createCollider(RAPIER.ColliderDesc.capsule(contact.halfHeight,contact.radius).setFriction(.35).setCollisionGroups(0x00040001),body);
+        // Only fingertips and the push tab touch tower bars. Links guide the tool
+        // pose and must not brace against or knock neighboring supports.
+        const groups=contact.name.startsWith('finger-')?0x00040001:0x00040000;
+        world.createCollider(RAPIER.ColliderDesc.capsule(contact.halfHeight,contact.radius).setFriction(.35).setCollisionGroups(groups),body);
         robot.push(body);
       }
     }
+    const pickerMayTouch=s.phase==='remove'&&s.active>=0&&s.carry&&!s.push;
+    robot.forEach((body,index)=>body.collider(0).setCollisionGroups(
+      index<4?(s.phase==='remove'?0x00040000:0x00040001):
+        s.phase!=='remove'?0x00040001:pickerMayTouch?0x00040002:0x00040000));
     const robotStarts=robot.map(body=>({p:body.translation(),q:body.rotation()}));
     // Pushes transfer force through contact; the target remains fully dynamic.
     if(s.push){
-      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(TAB.L/2,TAB.H/2,TAB.W/2).setFriction(.4),pusher);}
+      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(TAB.L/2,TAB.H/2,TAB.W/2).setFriction(.4).setCollisionGroups(0x00040002),pusher);}
     }else if(pusher){world.removeRigidBody(pusher);pusher=undefined;}
     // Fixed substeps keep stacking and contact independent of render frame rate.
     const steps=Math.max(1,Math.ceil(dt/(1/120)));world.timestep=dt/steps;
@@ -109,3 +137,4 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     quietTime=quiet?quietTime+dt:0;return fallen;
   }};
 }
+
