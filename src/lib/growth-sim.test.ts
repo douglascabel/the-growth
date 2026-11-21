@@ -48,12 +48,13 @@ describe('reach-limited sculpture',()=>{
    }
    expect(PUSH_STROKE).toBeLessThanOrEqual(.02);expect(tested).toBe(true);expect(closed).toBe(true);
  });
- it('keeps the pushed bar in its layer instead of picking it up',()=>{
+ it('pushes, pinches, and places the removed bar on top',()=>{
    const s=built();s.random=()=>.1;advance(s,1.6);
    const index=s.active;if(index<0)throw new Error('no safe removal was selected');
-   const layer=s.bars[index]?.layer;
    advance(s,REMOVE_CYCLE+.2);
-   const moved=s.bars[index];expect(moved?.inTower).toBe(true);expect(moved?.layer).toBe(layer);expect(s.moves).toBe(0);
+   const moved=s.bars[index];expect(moved?.inTower).toBe(true);
+   expect(moved?.layer).toBe(LAYERS);
+   expect(s.bars.filter(b=>b.inTower).length).toBe(MAX_BARS);
  });
  it('does not start a removal when no reachable top placement exists',()=>{
    const s=built();s.tower={x:ROBOT_BASE.x+2,z:TOWER.z};advance(s,2);

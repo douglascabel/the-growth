@@ -184,6 +184,11 @@ function barBounds(b:Bar):{min:Vec;max:Vec} {
 function beginRemoval(s:Sim) {
   // Deconstruction is a controlled closed-hand push.  It does not pick a bar up
   // or restack it, so all force reaches the tower through the selected bar.
+  const topLayer=Math.max(...s.bars.filter(b=>b.inTower).map(b=>b.layer),-1)+1;
+  const topPlacement:Placement={x:s.tower.x,z:s.tower.z,yaw:topLayer%2?Math.PI/2:0,layer:topLayer,slot:0};
+  const topToolY=(topLayer+1)*BAR.H+.0008;
+  if(!canReach([topPlacement.x,topToolY,topPlacement.z])||
+     maxToolHeight(topPlacement.x,topPlacement.z)<topToolY+.05)return;
   const tower=s.bars.filter(b=>b.inTower);
   const mode:'push'='push';
   const clearSides=new Map<number,number[]>(),reachableSides=new Map<number,number[]>(),ranked=strategicCandidates(s);
@@ -229,15 +234,25 @@ function stepRemove(s:Sim) {
   const top=Math.max(...s.bars.filter(x=>x.inTower).map(x=>x.p[1]+BAR.H/2));
   const roof=top+BAR.H+.04;
   const hi=(v:Vec):Vec=>[v[0],Math.min(maxToolHeight(v[0],v[2])-.01,roof),v[2]];
+  const topLayer=Math.max(...s.bars.filter(x=>x.inTower).map(x=>x.layer),-1)+1;
+  const topSlot=s.bars.filter(x=>x.inTower&&x.layer===topLayer-1).length%3;
+  const destPlacement:Placement={x:s.tower.x,z:s.tower.z,yaw:topLayer%2?Math.PI/2:0,layer:topLayer,slot:topSlot};
+  const destToolY=(topLayer+1)*BAR.H+.0008;
+  const dest:Vec=[destPlacement.x,destToolY,destPlacement.z];
+  const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,dest[1]+.15),dest[2]];
   // Keep the hand closed and press only one exposed bar end.  The gripper enters
-  // from the selected side, performs an 18 mm stroke, then retracts along it.
+  // from the selected side, performs an 18 mm stroke, then pinches and places it.
   const contact=at(c,-(BAR.L/2+.012)),pushed=at(contact,PUSH_STROKE),outPush=at(c,-(BAR.L/2+.09));
   const transit:Vec=[source.entry[0],Math.min(maxToolHeight(source.entry[0],source.entry[2])-.01,Math.max(roof,source.entry[1])),source.entry[2]];
   const sourceYaw=source.yaw+Math.PI/2;
-  animate(s,[[0,source.entry,sourceYaw,false],[.09,transit,sourceYaw,false],[.2,hi(outPush),sourceYaw,false],[.3,outPush,sourceYaw,false],[.4,contact,sourceYaw,false],[.63,pushed,sourceYaw,false],[.78,contact,sourceYaw,false],[.9,outPush,sourceYaw,false],[1,hi(outPush),sourceYaw,false]],k);
-  s.grip=PUSH_GRIP;s.closed=k>=.2&&k<.92;
+  animate(s,[[0,source.entry,sourceYaw,false],[.09,transit,sourceYaw,false],[.2,hi(outPush),sourceYaw,false],[.3,outPush,sourceYaw,false],[.4,contact,sourceYaw,false],[.63,pushed,sourceYaw,false],[.78,contact,sourceYaw,false],[.84,above,sourceYaw,true],[.94,dest,sourceYaw,true],[.98,above,sourceYaw,false],[1,hi(outPush),sourceYaw,false]],k);
+  s.grip=k>=.78&&k<.98?PINCH_GRIP:PUSH_GRIP;
+  s.closed=k>=.2&&k<.98;
+  s.carry=k>=.78&&k<.98;
+  if(s.carry)follow(s,b,k>=.94?1:smooth((k-.78)/.16));
   if(k>=.4&&k<.78)s.push={p:[...s.tool],yaw:source.yaw};
   else delete s.push;
+  if(k>=.94&&!s.released)release(s,b,destPlacement,dest[1]);
   if(k>=1){
     s.phaseT=0;s.carry=false;s.closed=false;delete s.grab;delete s.push;delete s.source;delete s.destination;s.active=-1;s.nextRemovalCheck=0;
   }

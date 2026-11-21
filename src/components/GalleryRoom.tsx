@@ -24,7 +24,46 @@ export default function GalleryRoom() {
     for(let x=0;x<256;x+=32){g.fillStyle='#665f52';g.fillRect(x,0,2,256);}
     const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(7,5);return t;
   },[]);
+  const herringbone = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d');
+    if (!g) return new THREE.Texture();
+    g.fillStyle = '#a8a99e';
+    g.fillRect(0, 0, 256, 256);
+    g.lineWidth = 3;
+    g.strokeStyle = '#7f8178';
+    for (let i = -256; i < 512; i += 32) {
+      g.beginPath();
+      g.moveTo(i, 0);
+      g.lineTo(i + 256, 256);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(i + 256, 0);
+      g.lineTo(i, 256);
+      g.stroke();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(18, 18);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, []);
   return <group>
+    <mesh rotation-x={-Math.PI / 2} position={[0, 0.006, 0]} receiveShadow>
+      <planeGeometry args={[40, 40]} />
+      <meshPhysicalMaterial map={herringbone} color="#c9c8bc" roughness={0.18} metalness={0.02} clearcoat={0.15} clearcoatRoughness={0.12} />
+    </mesh>
+    {[-1, 1].map(side => (
+      <group key={`glass-${side}`}>
+        {[-4.5, -1.5, 1.5, 4.5].map(z => (
+          <mesh key={z} position={[side * 6.55, 5.8, z]} rotation-z={side * -0.1} castShadow>
+            <boxGeometry args={[0.025, 4.6, 2.2]} />
+            <meshPhysicalMaterial color="#dfe8e5" roughness={0.08} transmission={0.72} transparent opacity={0.42} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+      </group>
+    ))}
     {/* White exhibition hall, open front and roof clerestory daylight. */}
     <mesh position={[0,2.8,-7]} receiveShadow><boxGeometry args={[14,5.6,.15]}/><meshStandardMaterial color="#eeeee8" roughness={.85}/></mesh>
     {[-1,1].map(side=><group key={side}>

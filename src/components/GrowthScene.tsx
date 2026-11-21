@@ -36,7 +36,7 @@ function useConcreteTexture() {
 }
 
 const modelBase = `${import.meta.env.BASE_URL}models/`;
-const robotObjUrl = `${modelBase}robot-arm/industrial-robot-arm.obj`;
+const robotGlbUrl = `${modelBase}kuka-kr210.glb`;
 const goldBarObjUrl = `${modelBase}gold-bar/gold-bar.obj`;
 const goldBarGlbUrl = `${modelBase}gold-bar/gold-bar.glb`;
 const robotTextureUrls = [
@@ -74,7 +74,7 @@ function useOptionalRobot() {
   const [object, setObject] = useState<THREE.Group | null>(null);
   useEffect(() => {
     let live = true;
-    new OBJLoader().load(robotObjUrl, loaded => { if (live) setObject(loaded); }, undefined, () => { if (live) setObject(null); });
+    new GLTFLoader().load(robotGlbUrl, gltf => { if (live) setObject(gltf.scene); }, undefined, () => { if (live) setObject(null); });
     return () => { live = false; };
   }, []);
   return object;
@@ -150,8 +150,7 @@ function useLingotGeometry() {
         if (!geometry && (child as THREE.Mesh).isMesh) {
           const mesh = child as THREE.Mesh;
           geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
-          // The source mesh is authored Y-up; cancel the embedded Z-up conversion so its embossed face is uppermost.
-          geometry.rotateX(Math.PI / 2);
+          // The decimated export is authored Y-up, matching normalizeLingot's inscription-up convention.
         }
       });
       if (geometry) optimize(geometry);
@@ -212,6 +211,14 @@ function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
         const m = (o as THREE.Mesh).clone();
         m.material = material; m.castShadow = true; m.receiveShadow = true;
         out[o.name] = m;
+        if (o.name.includes("A1")) out["robot_arm"] = m;
+        if (o.name.includes("A2")) out["robot_arm_large"] = m;
+        if (o.name.includes("A3")) out["Robot_arm_2"] = m;
+        if (o.name.includes("A4")) out["robot_arm_end"] = m;
+        if (o.name.includes("Base")) out["robot_arm_base"] = m;
+        if (o.name.includes("Grabber_hand_1") || o.name.includes("Jaw.L")) out["Grabber_hand_1"] = m;
+        if (o.name.includes("Grabber_hand_2") || o.name.includes("Jaw.R")) out["Grabber_hand_2"] = m;
+        if (o.name.includes("Grabber") || o.name.includes("Tool")) out["Grabber"] = m;
       }
     });
     return out;
