@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import * as THREE from 'three';
-import {isLoose,BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,GRIPPER_MODEL_HALF_SPAN,GRIPPER_CLOSE_TRAVEL,GRIPPER_FINGER_HALF_WIDTH,PUSH_GRIP,PUSH_STROKE,REMOVE_CYCLE,END_GRIP,PINCH_GRIP,createSim,stepSim,placement,eligibleBars,canReach,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE} from './growth-sim';
+import {isLoose,BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,GRIPPER_MODEL_HALF_SPAN,GRIPPER_CLOSE_TRAVEL,GRIPPER_FINGER_HALF_WIDTH,PUSH_GRIP,PUSH_STROKE,REMOVE_CYCLE,END_GRIP,PINCH_GRIP,createSim,stepSim,placement,eligibleBars,canReach,maxToolHeight,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE} from './growth-sim';
 import {createDynamics} from './growth-physics';
 import {GRIPPER_FINGER_RADIUS,gripHalfSpan,robotContacts} from './robot-kinematics';
 import {normalizeLingot} from './lingot-geometry';
@@ -18,6 +18,10 @@ describe('reach-limited sculpture',()=>{
    for(let i=1;i<p.count;i++)if(p.getY(i)>p.getY(top))top=i;expect(Math.hypot(p.getX(top),p.getZ(top))).toBeLessThan(1e-6);
  });
  it('seats the robot on the floor',()=>{expect(ROBOT_BASE.y-.003181*ROBOT_SCALE).toBeCloseTo(0,8);});
+ it('covers the floor-level tower with the articulated reach envelope',()=>{
+   expect(canReach([TOWER.x, BAR.H/2, TOWER.z])).toBe(true);
+   expect(maxToolHeight(TOWER.x,TOWER.z)).toBeGreaterThan(BAR.H);
+ });
  it('alternates three parallel bars by 90 degrees',()=>{
    for(let i=0;i<MAX_BARS;i++){const p=placement(i);expect(p.layer).toBe(Math.floor(i/3));expect(p.slot).toBe(i%3);expect(p.yaw).toBe(Math.floor(i/3)%2?Math.PI/2:0);}
    expect(placement(0).z).toBeCloseTo(TOWER.z-SLOT,6);expect(placement(2).z).toBeCloseTo(TOWER.z+SLOT,6);

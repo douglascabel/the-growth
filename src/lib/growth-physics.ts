@@ -16,7 +16,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     world.integrationParameters.normalizedAllowedLinearError=.0005;
     world.integrationParameters.normalizedPredictionDistance=.01;
     bodies=new Map();pusher=undefined;quietTime=0;robot=[];
-    world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.7));
+    world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.62).setRestitution(.005));
   };reset();
   return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box)=>armClear(tool,yaw,box),armClearMany:(tool,yaw,boxes)=>armClearMany(tool,yaw,boxes),chooseRemoval(s,candidates,routes=[]){
     const snapshot=world.takeSnapshot();

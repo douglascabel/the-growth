@@ -1,5 +1,6 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
@@ -74,8 +75,12 @@ function useOptionalRobot() {
   const [object, setObject] = useState<THREE.Group | null>(null);
   useEffect(() => {
     let live = true;
-    new GLTFLoader().load(robotGlbUrl, gltf => { if (live) setObject(gltf.scene); }, undefined, () => { if (live) setObject(null); });
-    return () => { live = false; };
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/gltf/`);
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+    loader.load(robotGlbUrl, gltf => { if (live) setObject(gltf.scene); }, undefined, () => { if (live) setObject(null); });
+    return () => { live = false; dracoLoader.dispose(); };
   }, []);
   return object;
 }
@@ -141,7 +146,10 @@ function useLingotGeometry() {
         }
       })();
     };
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/gltf/`);
     const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
     loader.setMeshoptDecoder(MeshoptDecoder);
     loader.load(goldBarGlbUrl, gltf => {
       gltf.scene.updateMatrixWorld(true);
@@ -165,7 +173,7 @@ function useLingotGeometry() {
         else if (live) setSource(null);
       }, undefined, () => { if (live) setSource(null); });
     });
-    return () => { live = false; };
+    return () => { live = false; dracoLoader.dispose(); };
   }, []);
   const geometry = useMemo(() => normalizeLingot(source ?? fallback, source?.userData["preserveNormals"] === true), [source, fallback]);
   useEffect(() => () => geometry.dispose(), [geometry]);
