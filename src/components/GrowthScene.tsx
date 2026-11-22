@@ -36,7 +36,7 @@ function useConcreteTexture() {
 }
 
 const modelBase = `${import.meta.env.BASE_URL}models/`;
-const robotGlbUrl = `${modelBase}kuka-kr210.glb`;
+const robotGlbUrl = `${modelBase}kuka-kr210.glb?v=2`;
 const goldBarGlbUrl = `${modelBase}gold-bar.glb`;
 const goldTextureUrls = [
   `${modelBase}gold-bar/material/color.jpg`,
@@ -70,6 +70,15 @@ function prepareRobot(scene: THREE.Group) {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
+      const source = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      if (source instanceof THREE.MeshStandardMaterial) {
+        const material = source.clone();
+        const grip = /Grabber|Jaw/i.test(mesh.name);
+        material.color.set(grip ? "#202326" : "#f26a21");
+        material.metalness = grip ? 0.82 : 0.18;
+        material.roughness = grip ? 0.32 : 0.38;
+        mesh.material = material;
+      }
     }
   });
   for (const name of robotJointNames) {
