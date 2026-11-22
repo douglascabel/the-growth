@@ -18,7 +18,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     bodies=new Map();pusher=undefined;quietTime=0;robot=[];
     world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.62).setRestitution(.005));
   };reset();
-  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box)=>armClear(tool,yaw,box),armClearMany:(tool,yaw,boxes)=>armClearMany(tool,yaw,boxes),chooseRemoval(s,candidates,routes=[]){
+  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box,rig)=>armClear(tool,yaw,box,rig),armClearMany:(tool,yaw,boxes,rig)=>armClearMany(tool,yaw,boxes,rig),chooseRemoval(s,candidates,routes=[]){
     const snapshot=world.takeSnapshot();
     const scores:{index:number;stable:boolean;motion:number}[]=[];
     // Probe the actual contact network without moving the visible world or pinning supports.
@@ -87,7 +87,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         s.carry?0x00020001:b.inTower?0x00020005:0x00020004;
       body.collider(0).setCollisionGroups(groups);
     }
-    const contacts=robotContacts(s.tool,s.toolYaw,s.carry||s.closed,s.grip);
+    const contacts=robotContacts(s.tool,s.toolYaw,s.carry||s.closed,s.grip,s.rig);
     if(!robot.length){
       for(const contact of contacts){
         const body=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...contact.p).setRotation(contact.q));

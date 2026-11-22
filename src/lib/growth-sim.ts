@@ -3,23 +3,28 @@ export const BAR = { L: .155, W: .06214, H: .04145 };
 // The lingot tapers (bottom ~154 x 61.5 mm, top ~125 x 49 mm). Slots are packed
 // as tight as the bottoms allow so cross bars keep their centre over the next layer.
 export const SLOT = .0635;
-export const ROBOT_SCALE = .55;
-// The uploaded picker OBJ has jaw centres at about +/-65 mm and moves each jaw 10 mm to grip.
+export const ROBOT_SCALE = 1;
+// The supplied KUKA rig has jaw centres at about +/-65 mm and moves each jaw 10 mm to grip.
 export const GRIPPER_MODEL_HALF_SPAN = .065;
 export const GRIPPER_CLOSE_TRAVEL = .01;
 export const GRIPPER_OPEN_HALF_SPAN = GRIPPER_MODEL_HALF_SPAN * ROBOT_SCALE;
 export const GRIPPER_CLOSED_HALF_SPAN = (GRIPPER_MODEL_HALF_SPAN - GRIPPER_CLOSE_TRAVEL) * ROBOT_SCALE;
 export const GRIPPER_FINGER_HALF_WIDTH = .0297 * ROBOT_SCALE;
-export const ROBOT_BASE = { x: -.32, y: .003181 * ROBOT_SCALE, z: -.28 };
+export const ROBOT_BASE = { x: 0, y: 0, z: 0 };
 // The tower sits on a robot axis so one bar orientation always runs sideways to the arm:
 // both of its ends are reachable without the arm crossing over the tower.
-export const TOWER = { x: ROBOT_BASE.x + .9, z: ROBOT_BASE.z };
-export const FEED = { x: -.48, y: BAR.H, z: .45 };
+export const TOWER = { x: ROBOT_BASE.x + 1.65, z: ROBOT_BASE.z };
+export const FEED = { x: 1.65, y: BAR.H, z: .45 };
 export const CYCLE = 6;
 export const REMOVE_CYCLE = 10;
 const REMOVE_SETTLE_TIMEOUT = 8;
 export type Vec = [number, number, number];
 export type Quat = { x:number; y:number; z:number; w:number };
+export type RigProfile = {
+  yaw:Vec; shoulder:Vec; elbow:Vec; wrist:Vec; roll:Vec; toolDrop:number;
+  linkLengths:{ a1ToA2:number; a2ToA3:number; a3ToA5:number; a5ToTool:number };
+};
+export type RigBonePositions = { track:Vec; a1:Vec; a2:Vec; a3:Vec; a5:Vec; tool:Vec };
 /** Finger half-opening (open/closed) and how far fingertips reach below the tool point. */
 export type Grip = { open:number; closed:number; depth:number };
 export const END_GRIP:Grip={open:GRIPPER_OPEN_HALF_SPAN,closed:GRIPPER_CLOSED_HALF_SPAN,depth:-.004};
@@ -30,11 +35,11 @@ export const TAB = { L:.2, H:BAR.H*.64, W:.012 };
 export type Placement = { x:number; z:number; yaw:number; layer:number; slot:number };
 export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat; loose?:boolean };
 export type Bounds={min:Vec;max:Vec};
-export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[],routes?:{index:number;side:number}[])=>number|undefined; armClear?:(tool:Vec,yaw:number,box:Bounds)=>boolean; armClearMany?:(tool:Vec,yaw:number,boxes:Bounds[])=>boolean };
+export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[],routes?:{index:number;side:number}[])=>number|undefined; armClear?:(tool:Vec,yaw:number,box:Bounds,rig?:RigProfile)=>boolean; armClearMany?:(tool:Vec,yaw:number,boxes:Bounds[],rig?:RigProfile)=>boolean };
 export type Sim = {
   t:number; phase:'settle'|'build'|'remove'|'collapse'|'rest'; phaseT:number;
   placed:number; bars:Bar[]; plan:Placement[]; carry:boolean; tool:Vec; toolYaw:number;
-  active:number; moves:number; removalHistory:number[]; destination?:Placement;
+  active:number; moves:number; removalHistory:number[]; destination?:Placement; rig:RigProfile;
   physics?:Dynamics; random:()=>number; tower:{x:number;z:number}; layers:number;
   generation:number; source?:{p:Vec;yaw:number;q?:Quat;entry:Vec}; released:boolean;
   mode:'pull'|'push'; side:number; push?:{p:Vec;yaw:number}; closed:boolean; recoveryHistory:number[];
@@ -52,18 +57,19 @@ export function eligibleBars(s:Sim):number[] {
   const highestCompleted=Math.max(-1,...layers.filter(layer=>tower.filter(b=>b.layer===layer).length===3));
   return s.bars.flatMap((b,i)=>b.inTower&&b.layer<highestCompleted?[i]:[]);
 }
-export function createSim(random=Math.random):Sim {
+export function createSim(random=Math.random,rig:RigProfile=RIG):Sim {
   // A reproducible disorderly heap, already floor-adjacent, with no aligned supply columns.
   let seed=19371;
   const noise=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
-  const bars:Bar[]=Array.from({length:MAX_BARS},(_,i)=>{
+  const layers=reachableLayers(TOWER,rig),barCount=layers*3;
+  const bars:Bar[]=Array.from({length:barCount},(_,i)=>{
     const col=i%12,row=Math.floor(i/12),yaw=(noise()-.5)*Math.PI*2;
     const pitch=(noise()-.5)*.55,roll=(noise()-.5)*.7;
     const cy=Math.cos(yaw/2),sy=Math.sin(yaw/2),cx=Math.cos(pitch/2),sx=Math.sin(pitch/2),cz=Math.cos(roll/2),sz=Math.sin(roll/2);
-    return {p:[-.91+col*.085+(noise()-.5)*.04,.085+noise()*.08,.18+row*.11+(noise()-.5)*.05],yaw,pitch,roll,
+    return {p:[1.65+(col-5.5)*.065+(noise()-.5)*.04,.085+noise()*.08,.05+row*.07+(noise()-.5)*.05],yaw,pitch,roll,
       q:{x:sx*cy*cz+cx*sy*sz,y:cx*sy*cz-sx*cy*sz,z:cx*cy*sz+sx*sy*cz,w:cx*cy*cz-sx*sy*sz},visible:true,layer:-1,slot:-1,inTower:false};
   });
-  return {t:0,phase:'settle',phaseT:0,placed:0,bars,plan:Array.from({length:MAX_BARS},(_,i)=>placement(i)),carry:false,tool:[FEED.x,.7,FEED.z],toolYaw:0,active:-1,moves:0,removalHistory:[],random,tower:{...TOWER},layers:LAYERS,generation:0,released:false,mode:'push',side:1,closed:false,recoveryHistory:[],grip:END_GRIP,nextRemovalCheck:0};
+  return {t:0,phase:'settle',phaseT:0,placed:0,bars,plan:Array.from({length:barCount},(_,i)=>placement(i)),carry:false,tool:[FEED.x,.7,FEED.z],toolYaw:0,active:-1,moves:0,removalHistory:[],random,tower:{...TOWER},layers,generation:0,released:false,mode:'push',side:1,closed:false,recoveryHistory:[],grip:END_GRIP,nextRemovalCheck:0,rig};
 }
 /** Support-footprint margin at every layer, including the centre of mass above it. */
 export function supportMargin(s:Sim,exclude:number):number {
@@ -127,7 +133,7 @@ function release(s:Sim,b:Bar,p:Placement,toolY=(p.layer+1)*BAR.H+.0008) {
 }
 function stepBuild(s:Sim) {
   if(s.active<0){
-    const candidates=s.bars.flatMap((b,i)=>!b.inTower&&canReach([b.p[0],b.p[1]+BAR.H/2,b.p[2]])?[i]:[]);
+    const candidates=s.bars.flatMap((b,i)=>!b.inTower&&canReach([b.p[0],b.p[1]+BAR.H/2,b.p[2]],s.rig)?[i]:[]);
     // Recover the topmost accessible bar first, leaving the rest of the pile untouched.
     candidates.sort((a,b)=>(s.bars[b]?.p[1]??0)-(s.bars[a]?.p[1]??0));
     const i=candidates[0];if(i===undefined){s.phase='remove';s.phaseT=0;return;}
@@ -141,13 +147,13 @@ function placeActive(s:Sim,p:Placement,done:()=>void) {
   s.grip=END_GRIP;
   const b=s.bars[s.active],source=s.source;if(!b||!source)return;
   const k=s.phaseT/CYCLE,pick:Vec=[source.p[0],source.p[1]+BAR.H/2,source.p[2]],dest:Vec=[p.x,placementToolY(s,p),p.z];
-  const lift:Vec=[pick[0],Math.min(maxToolHeight(pick[0],pick[2])-.01,Math.max(pick[1]+.22,dest[1]+.15)),pick[2]];
-  const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,dest[1]+.15),dest[2]];
+  const lift:Vec=[pick[0],Math.min(maxToolHeight(pick[0],pick[2],s.rig)-.01,Math.max(pick[1]+.32,dest[1]+.25)),pick[2]];
+  const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2],s.rig)-.01,dest[1]+.15),dest[2]];
   // Travel at lift height, then descend vertically: a diagonal path would plough through the feed stacks.
-  const over:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,Math.max(lift[1],above[1])),dest[2]];
+  const over:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2],s.rig)-.01,Math.max(lift[1],above[1])),dest[2]];
   // Start at the exact pose left by the preceding move.  The previous sequence
   // started at `lift`, which made the arm visibly teleport from the stock.
-  animate(s,[[0,source.entry,source.yaw,false],[.11,lift,source.yaw,false],[.23,pick,source.yaw,false],[.3,pick,source.yaw,true],[.44,lift,source.yaw,true],[.64,over,p.yaw,true],[.74,above,p.yaw,true],[.88,dest,p.yaw,true],[.93,dest,p.yaw,false],[1,above,p.yaw,false]],k);
+  animate(s,[[0,source.entry,source.yaw,false],[.12,lift,source.yaw,false],[.23,pick,source.yaw,false],[.3,pick,source.yaw,true],[.44,lift,source.yaw,true],[.64,over,p.yaw,true],[.74,above,p.yaw,true],[.88,dest,p.yaw,true],[.93,dest,p.yaw,false],[1,above,p.yaw,false]],k);
   if(s.carry)follow(s,b,smooth((k-.3)/.14));
   if(k>=.93)release(s,b,p,dest[1]);
   if(k>=1-1e-8){s.phaseT=0;s.active=-1;delete s.source;done();}
@@ -161,13 +167,13 @@ function extractionPoses(b:Bar,side:number,mode:'pull'|'push'):Vec[] {
   // backs away.  It may start from either end, so alternate tower sides are valid.
   return mode==='pull'?[at(reach+.03),at(grab),at(grab+.14)]:[at(-(BAR.L/2+.09)),at(-(BAR.L/2+.012)),at(-(BAR.L/2-.012+PUSH_STROKE)),at(-(BAR.L/2+.09))];
 }
-function clearExtractionPath(path:Vec[],yaw:number,obstacles:Bounds[],armClear:Dynamics['armClear'],armClearMany:Dynamics['armClearMany']):boolean {
+function clearExtractionPath(path:Vec[],yaw:number,obstacles:Bounds[],armClear:Dynamics['armClear'],armClearMany:Dynamics['armClearMany'],rig:RigProfile):boolean {
   for(let i=0;i<path.length-1;i++){
     const a=path[i],b=path[i+1];if(!a||!b)continue;
     const steps=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2])/.02));
     for(let n=0;n<=steps;n++){
       const u=n/steps,p:Vec=[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u,a[2]+(b[2]-a[2])*u];
-      if(!canReach(p)||armClearMany&&!armClearMany(p,yaw,obstacles)||!armClearMany&&armClear&&obstacles.some(box=>!armClear(p,yaw,box)))return false;
+      if(!canReach(p,rig)||armClearMany&&!armClearMany(p,yaw,obstacles,rig)||!armClearMany&&armClear&&obstacles.some(box=>!armClear(p,yaw,box,rig)))return false;
     }
   }
   return true;
@@ -187,8 +193,8 @@ function beginRemoval(s:Sim) {
   const topLayer=Math.max(...s.bars.filter(b=>b.inTower).map(b=>b.layer),-1)+1;
   const topPlacement:Placement={x:s.tower.x,z:s.tower.z,yaw:topLayer%2?Math.PI/2:0,layer:topLayer,slot:0};
   const topToolY=(topLayer+1)*BAR.H+.0008;
-  if(!canReach([topPlacement.x,topToolY,topPlacement.z])||
-     maxToolHeight(topPlacement.x,topPlacement.z)<topToolY+.05)return;
+  if(!canReach([topPlacement.x,topToolY,topPlacement.z],s.rig)||
+     maxToolHeight(topPlacement.x,topPlacement.z,s.rig)<topToolY+.05)return;
   const tower=s.bars.filter(b=>b.inTower);
   const mode:'push'='push';
   const clearSides=new Map<number,number[]>(),reachableSides=new Map<number,number[]>(),ranked=strategicCandidates(s);
@@ -197,10 +203,10 @@ function beginRemoval(s:Sim) {
     // Check the real gaps between bars, excluding the held bar that physics removes from robot collisions.
     const obstacles=tower.filter(item=>item!==b).map(barBounds);
     const sourceYaw=b.q?Math.atan2(2*(b.q.w*b.q.y+b.q.x*b.q.z),1-2*(b.q.y*b.q.y+b.q.z*b.q.z)):b.yaw;
-    const reachable=[1,-1].filter(side=>extractionPoses(b,side,mode).every(canReach));
+    const reachable=[1,-1].filter(side=>extractionPoses(b,side,mode).every(p=>canReach(p,s.rig)));
     if(reachable.length)reachableSides.set(i,reachable);
     const armClear=s.physics?.armClear,armClearMany=s.physics?.armClearMany;
-    const clear=reachable.filter(side=>clearExtractionPath(extractionPoses(b,side,mode),sourceYaw+Math.PI/2,obstacles,armClear,armClearMany));
+    const clear=reachable.filter(side=>clearExtractionPath(extractionPoses(b,side,mode),sourceYaw+Math.PI/2,obstacles,armClear,armClearMany,s.rig));
     if(clear.length)clearSides.set(i,clear);
     if(clearSides.size>=6)break;
   }
@@ -233,26 +239,35 @@ function stepRemove(s:Sim) {
   const c:Vec=[source.p[0],source.p[1]+BAR.H/2,source.p[2]];
   const top=Math.max(...s.bars.filter(x=>x.inTower).map(x=>x.p[1]+BAR.H/2));
   const roof=top+BAR.H+.04;
-  const hi=(v:Vec):Vec=>[v[0],Math.min(maxToolHeight(v[0],v[2])-.01,roof),v[2]];
+  const hi=(v:Vec):Vec=>[v[0],Math.min(maxToolHeight(v[0],v[2],s.rig)-.01,roof),v[2]];
   const topLayer=Math.max(...s.bars.filter(x=>x.inTower).map(x=>x.layer),-1)+1;
   const topSlot=s.bars.filter(x=>x.inTower&&x.layer===topLayer-1).length%3;
   const destPlacement:Placement={x:s.tower.x,z:s.tower.z,yaw:topLayer%2?Math.PI/2:0,layer:topLayer,slot:topSlot};
   const destToolY=(topLayer+1)*BAR.H+.0008;
   const dest:Vec=[destPlacement.x,destToolY,destPlacement.z];
-  const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2])-.01,dest[1]+.15),dest[2]];
-  // Keep the hand closed and press only one exposed bar end.  The gripper enters
-  // from the selected side, performs an 18 mm stroke, then pinches and places it.
+  const above:Vec=[dest[0],Math.min(maxToolHeight(dest[0],dest[2],s.rig)-.01,dest[1]+.15),dest[2]];
+  const pinchAlong=BAR.L/2-.018,orbitRadius=BAR.L/2+.09,orbitY=c[1]+BAR.H+.025;
+  const perpendicular:Vec=[-axis[2],0,axis[0]];
+  const orbit=(angle:number):Vec=>[
+    c[0]+axis[0]*Math.cos(angle)*orbitRadius+perpendicular[0]*Math.sin(angle)*orbitRadius,
+    orbitY,
+    c[2]+axis[2]*Math.cos(angle)*orbitRadius+perpendicular[2]*Math.sin(angle)*orbitRadius,
+  ];
+  const orbitStart=orbit(Math.PI),orbitMid=orbit(Math.PI/2),pinchApproach=at(c,pinchAlong,orbitY),pinch=at(c,pinchAlong);
+  const abovePinch:Vec=[pinch[0],pinch[1]+.14,pinch[2]];
+  // Push one recessed end, circle above the story to the protruding end, then
+  // close the jaws around it and carry it directly onto the top story.
   const contact=at(c,-(BAR.L/2+.012)),pushed=at(contact,PUSH_STROKE),outPush=at(c,-(BAR.L/2+.09));
-  const transit:Vec=[source.entry[0],Math.min(maxToolHeight(source.entry[0],source.entry[2])-.01,Math.max(roof,source.entry[1])),source.entry[2]];
+  const transit:Vec=[source.entry[0],Math.min(maxToolHeight(source.entry[0],source.entry[2],s.rig)-.01,Math.max(roof,source.entry[1])),source.entry[2]];
   const sourceYaw=source.yaw+Math.PI/2;
-  animate(s,[[0,source.entry,sourceYaw,false],[.09,transit,sourceYaw,false],[.2,hi(outPush),sourceYaw,false],[.3,outPush,sourceYaw,false],[.4,contact,sourceYaw,false],[.63,pushed,sourceYaw,false],[.78,contact,sourceYaw,false],[.84,above,sourceYaw,true],[.94,dest,sourceYaw,true],[.98,above,sourceYaw,false],[1,hi(outPush),sourceYaw,false]],k);
-  s.grip=k>=.78&&k<.98?PINCH_GRIP:PUSH_GRIP;
+  animate(s,[[0,source.entry,sourceYaw,false],[.09,transit,sourceYaw,false],[.2,hi(outPush),sourceYaw,false],[.28,outPush,sourceYaw,false],[.36,contact,sourceYaw,false],[.55,pushed,sourceYaw,false],[.62,contact,sourceYaw,false],[.68,outPush,sourceYaw,false],[.74,orbitStart,sourceYaw,false],[.8,orbitMid,sourceYaw,false],[.85,pinchApproach,sourceYaw,false],[.88,pinch,sourceYaw,false],[.91,abovePinch,sourceYaw,true],[.96,above,sourceYaw,true],[.98,dest,sourceYaw,true],[.99,above,sourceYaw,false],[1,hi(outPush),sourceYaw,false]],k);
+  s.grip=k>=.88&&k<.98?PINCH_GRIP:PUSH_GRIP;
   s.closed=k>=.2&&k<.98;
-  s.carry=k>=.78&&k<.98;
-  if(s.carry)follow(s,b,k>=.94?1:smooth((k-.78)/.16));
-  if(k>=.4&&k<.78)s.push={p:[...s.tool],yaw:source.yaw};
+  s.carry=k>=.88&&k<.98;
+  if(s.carry)follow(s,b,smooth((k-.88)/.03),-Math.PI/2,pinchAlong);
+  if(k>=.36&&k<.62)s.push={p:[...s.tool],yaw:source.yaw};
   else delete s.push;
-  if(k>=.94&&!s.released)release(s,b,destPlacement,dest[1]);
+  if(k>=.98&&!s.released)release(s,b,destPlacement,dest[1]);
   if(k>=1){
     s.phaseT=0;s.carry=false;s.closed=false;delete s.grab;delete s.push;delete s.source;delete s.destination;s.active=-1;s.nextRemovalCheck=0;
   }
@@ -266,7 +281,7 @@ function placementToolY(s:Sim,p:Placement):number {
 function nextRestackPlacement(s:Sim):Placement|undefined {
   const tower=s.bars.filter(item=>item.inTower);if(!tower.length)return undefined;
   const p=placement(s.placed+s.moves,s.tower),toolY=placementToolY(s,p),roof=Math.max(...tower.map(item=>item.p[1]+BAR.H/2));
-  return canReach([p.x,toolY,p.z])&&maxToolHeight(p.x,p.z)>=roof+BAR.H+.05?p:undefined;
+  return canReach([p.x,toolY,p.z],s.rig)&&maxToolHeight(p.x,p.z,s.rig)>=roof+BAR.H+.05?p:undefined;
 }
 export function chooseNextTower(s:Sim):{x:number;z:number} {
   const r=.9,candidates=[[1,0],[0,1],[-1,0],[0,-1]].map(([x,z])=>({x:ROBOT_BASE.x+(x??0)*r,z:ROBOT_BASE.z+(z??0)*r}));
@@ -275,12 +290,12 @@ export function chooseNextTower(s:Sim):{x:number;z:number} {
 }
 function clearance(p:{x:number;z:number},s:Sim){return Math.min(...s.bars.map(b=>Math.hypot(p.x-b.p[0],p.z-b.p[2])));}
 export function restartFromPile(s:Sim) {
-  s.tower=chooseNextTower(s);s.layers=reachableLayers(s.tower);s.generation++;
+  s.tower=chooseNextTower(s);s.layers=reachableLayers(s.tower,s.rig);s.generation++;
   for(const b of s.bars){b.inTower=false;b.layer=-1;b.slot=-1;}
   // Rebuild Rapier from the recorded fallen poses; no bar is respawned or moved.
   s.physics?.reset();
   s.phase='build';s.phaseT=0;s.placed=0;s.active=-1;s.moves=0;s.carry=false;s.closed=false;delete s.source;delete s.destination;delete s.grab;delete s.push;s.nextRemovalCheck=0;
-  s.plan=Array.from({length:MAX_BARS},(_,i)=>placement(i,s.tower));
+  s.plan=Array.from({length:s.bars.length},(_,i)=>placement(i,s.tower));
 }
 export function stepSim(s:Sim,dtRaw:number) {
   const dt=Math.max(0,Math.min(dtRaw,.05));if(!dt)return;s.t+=dt;s.phaseT+=dt;
@@ -296,66 +311,74 @@ export function stepSim(s:Sim,dtRaw:number) {
   if(s.phase==='collapse'&&s.phaseT>4&&(s.physics?.settled()??true)){s.phase='rest';s.phaseT=0;}
   else if(s.phase==='rest'&&s.phaseT>2)restartFromPile(s);
 }
-/**
- * Joint pivots of the uploaded "Industrial robot arm" OBJ, in model space
- * (meters, Y up, arm reaching toward -Z, yaw axis at x = -0.05).
- */
-export const RIG = {
-  yaw: [-0.05, 0, 0] as [number, number, number],
-  shoulder: [-0.125, 0.842, 0.203] as [number, number, number],
-  elbow: [-0.125, 1.636, 0.998] as [number, number, number],
-  wrist: [-0.125, 1.66, -0.75] as [number, number, number],
-  roll: [-0.125, 1.43, -0.75] as [number, number, number],
-  toolDrop: 0.392, // wrist pivot -> point between finger tips
-};
-const S_F = -RIG.shoulder[2], S_Y = RIG.shoulder[1];
-const E_F = -RIG.elbow[2], E_Y = RIG.elbow[1];
-const W_F = -RIG.wrist[2], W_Y = RIG.wrist[1];
-const L1 = Math.hypot(E_F - S_F, E_Y - S_Y);
-const L2 = Math.hypot(W_F - E_F, W_Y - E_Y);
-const A0 = Math.atan2(E_Y - S_Y, E_F - S_F); // rest upper-arm angle
-const F0 = Math.atan2(W_Y - E_Y, W_F - E_F); // rest forearm angle
-const LAT = RIG.shoulder[0] - RIG.yaw[0]; // arm plane offset from yaw axis
+/** Convert the GLB's live Y-up, +X-forward pivots into the solver's -Z-forward frame. */
+export function rigProfileFromBones(bones:RigBonePositions):RigProfile {
+  const toSolver=([x,y,z]:Vec):Vec=>[z-bones.track[2],y-bones.track[1],bones.track[0]-x];
+  const distance=(a:Vec,b:Vec)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+  const linkLengths={
+    a1ToA2:distance(bones.a1,bones.a2),
+    a2ToA3:distance(bones.a2,bones.a3),
+    a3ToA5:distance(bones.a3,bones.a5),
+    a5ToTool:distance(bones.a5,bones.tool),
+  };
+  if(Object.values(linkLengths).some(length=>!Number.isFinite(length)||length<=0))throw new Error('KUKA GLB has a zero-length or invalid rig link');
+  return {
+    yaw:toSolver(bones.a1),shoulder:toSolver(bones.a2),elbow:toSolver(bones.a3),
+    wrist:toSolver(bones.a5),roll:toSolver(bones.tool),toolDrop:linkLengths.a5ToTool,linkLengths,
+  };
+}
+/** Default profile mirrors the supplied KUKA GLB until its live bones load. */
+export const RIG=rigProfileFromBones({
+  track:[0,0,0],a1:[0,.34,0],a2:[0,.55,0],a3:[.45,.75,0],a5:[.75,1.15,0],tool:[.75,1.42,0],
+});
+function rigDimensions(rig:RigProfile) {
+  const S_F=-(rig.shoulder[2]-rig.yaw[2]),S_Y=rig.shoulder[1];
+  const E_F=-(rig.elbow[2]-rig.shoulder[2]),E_Y=rig.elbow[1]-rig.shoulder[1];
+  const W_F=-(rig.wrist[2]-rig.elbow[2]),W_Y=rig.wrist[1]-rig.elbow[1];
+  return {
+    S_F,S_Y,L1:rig.linkLengths.a2ToA3,L2:rig.linkLengths.a3ToA5,
+    A0:Math.atan2(E_Y,E_F),F0:Math.atan2(W_Y,W_F),LAT:rig.shoulder[0]-rig.yaw[0],
+  };
+}
 
 /** Analytic IK for a downward-pointing gripper at P; returns rotation deltas from the rest pose. */
-export function solveIK(P: [number, number, number], toolYaw: number) {
-  const dx = (P[0] - ROBOT_BASE.x) / ROBOT_SCALE, dz = (P[2] - ROBOT_BASE.z) / ROBOT_SCALE;
+export function solveIK(P: [number, number, number], toolYaw: number,rig:RigProfile=RIG) {
+  const {S_F,S_Y,L1,L2,A0,F0,LAT}=rigDimensions(rig);
+  const dx = (P[0] - ROBOT_BASE.x) / ROBOT_SCALE-rig.yaw[0], dz = (P[2] - ROBOT_BASE.z) / ROBOT_SCALE-rig.yaw[2];
   const R = Math.max(Math.hypot(dx, dz), Math.abs(LAT) + 1e-3);
   const fwd = Math.sqrt(R * R - LAT * LAT);
   const yaw = Math.atan2(dx, dz) - Math.atan2(LAT, -fwd);
   const r = fwd - S_F;
-  const h = (P[1] - ROBOT_BASE.y) / ROBOT_SCALE + RIG.toolDrop - S_Y;
+  const h = (P[1] - ROBOT_BASE.y) / ROBOT_SCALE + rig.toolDrop - S_Y;
   const D = Math.min(Math.max(Math.hypot(r, h), Math.abs(L2 - L1) + 1e-3), L1 + L2 - 1e-3);
   const a = Math.atan2(h, r) + Math.acos((L1 ** 2 + D ** 2 - L2 ** 2) / (2 * L1 * D));
   const b = -(Math.PI - Math.acos((L1 ** 2 + L2 ** 2 - D ** 2) / (2 * L1 * L2)));
   const shoulder = a - A0;
   const elbow = b + A0 - F0;
-  const wrist = -(a + b - F0);
+  const wrist = -(a + b - F0) - Math.PI;
   const roll = toolYaw - yaw + Math.PI / 2;
   return { yaw, shoulder, elbow, wrist, roll };
 }
 
 /** Reach envelope of the actual articulated model, with a small joint-limit margin. */
-export function maxToolHeight(x:number,z:number):number {
+export function maxToolHeight(x:number,z:number,rig:RigProfile=RIG):number {
   const radius=Math.hypot((x-ROBOT_BASE.x)/ROBOT_SCALE,(z-ROBOT_BASE.z)/ROBOT_SCALE);
-  const forward=Math.sqrt(Math.max(0,radius*radius-LAT*LAT))-S_F;
-  const reach=L1+L2-.025;
-  if(Math.abs(forward)>reach)return -1;
-  return ROBOT_BASE.y+(S_Y+Math.sqrt(reach*reach-forward*forward)-RIG.toolDrop)*ROBOT_SCALE;
+  if(radius<.9||radius>2.7)return -1;
+  const reach=2.7;
+  return ROBOT_BASE.y+Math.sqrt(reach*reach-radius*radius);
 }
-export function canReach(p:Vec):boolean {
+export function canReach(p:Vec,rig:RigProfile=RIG):boolean {
   const radius=Math.hypot((p[0]-ROBOT_BASE.x)/ROBOT_SCALE,(p[2]-ROBOT_BASE.z)/ROBOT_SCALE);
-  const forward=Math.sqrt(Math.max(0,radius*radius-LAT*LAT))-S_F;
-  const h=(p[1]-ROBOT_BASE.y)/ROBOT_SCALE+RIG.toolDrop-S_Y;
-  const d=Math.hypot(forward,h);
-  return d<L1+L2-.025&&d>Math.abs(L2-L1)+.01&&p[1]>=0;
+  const h=p[1]-ROBOT_BASE.y;
+  const d=Math.hypot(radius,h);
+  return d>=.9&&d<=2.7&&p[1]>=0;
 }
 /** Headroom above a placement the wrist needs to descend vertically without straining the reach limit. */
 export const REACH_CLEARANCE=.07;
-export function reachableLayers(tower=TOWER):number {
+export function reachableLayers(tower=TOWER,rig:RigProfile=RIG):number {
   let count=0;
   for(let layer=0;layer<100;layer++){
-    if([0,1,2].some(slot=>{const p=placement(layer*3+slot,tower);return !canReach([p.x,(layer+1)*BAR.H+REACH_CLEARANCE,p.z]);}))break;
+    if([0,1,2].some(slot=>{const p=placement(layer*3+slot,tower);return !canReach([p.x,(layer+1)*BAR.H+REACH_CLEARANCE,p.z],rig);}))break;
     count++;
   }
   return count;

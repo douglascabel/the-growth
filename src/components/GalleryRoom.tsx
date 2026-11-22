@@ -24,36 +24,7 @@ export default function GalleryRoom() {
     for(let x=0;x<256;x+=32){g.fillStyle='#665f52';g.fillRect(x,0,2,256);}
     const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(7,5);return t;
   },[]);
-  const herringbone = useMemo(() => {
-    const c = document.createElement('canvas');
-    c.width = c.height = 256;
-    const g = c.getContext('2d');
-    if (!g) return new THREE.Texture();
-    g.fillStyle = '#a8a99e';
-    g.fillRect(0, 0, 256, 256);
-    g.lineWidth = 3;
-    g.strokeStyle = '#7f8178';
-    for (let i = -256; i < 512; i += 32) {
-      g.beginPath();
-      g.moveTo(i, 0);
-      g.lineTo(i + 256, 256);
-      g.stroke();
-      g.beginPath();
-      g.moveTo(i + 256, 0);
-      g.lineTo(i, 256);
-      g.stroke();
-    }
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(18, 18);
-    t.colorSpace = THREE.SRGBColorSpace;
-    return t;
-  }, []);
   return <group>
-    <mesh rotation-x={-Math.PI / 2} position={[0, 0.006, 0]} receiveShadow>
-      <planeGeometry args={[40, 40]} />
-      <meshPhysicalMaterial map={herringbone} color="#c9c8bc" roughness={0.18} metalness={0.02} clearcoat={0.15} clearcoatRoughness={0.12} />
-    </mesh>
     {[-1, 1].map(side => (
       <group key={`glass-${side}`}>
         {[-4.5, -1.5, 1.5, 4.5].map(z => (

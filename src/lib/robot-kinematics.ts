@@ -1,4 +1,4 @@
-import { END_GRIP, GRIPPER_FINGER_HALF_WIDTH, type Grip, RIG, ROBOT_BASE, ROBOT_SCALE, solveIK, type Vec, type Quat } from './growth-sim';
+import { END_GRIP, GRIPPER_FINGER_HALF_WIDTH, type Grip, type RigProfile, RIG, ROBOT_BASE, ROBOT_SCALE, solveIK, type Vec, type Quat } from './growth-sim';
 
 export type RobotContact = { name:string; p:Vec; q:Quat; radius:number; halfHeight:number };
 export function gripHalfSpan(grip:Grip,carrying:boolean):number { return carrying?grip.closed:grip.open; }
@@ -16,12 +16,12 @@ function capsule(name:string,a:Vec,b:Vec,radius:number):RobotContact {
   const q=n<1e-8?{x:1,y:0,z:0,w:0}:{x:v[2]/n,y:0,z:-v[0]/n,w:(1+v[1])/n};
   return {name,p:a.map((x,i)=>(x+(b[i]??0))/2) as Vec,q,radius,halfHeight:length/2};
 }
-/** Same pivot hierarchy as the supplied OBJ, expressed without a renderer. */
-export function robotContacts(tool:Vec,toolYaw:number,carry=false,grip:Grip=END_GRIP):RobotContact[] {
-  const ik=solveIK(tool,toolYaw);
-  const shoulder=ry(sub(RIG.shoulder,RIG.yaw),ik.yaw);
-  const elbow=add(shoulder,ry(rx(sub(RIG.elbow,RIG.shoulder),ik.shoulder),ik.yaw));
-  const wrist=add(elbow,ry(rx(sub(RIG.wrist,RIG.elbow),ik.shoulder+ik.elbow),ik.yaw));
+/** KUKA KR210 pivots in the same model-to-world transform used by the renderer. */
+export function robotContacts(tool:Vec,toolYaw:number,carry=false,grip:Grip=END_GRIP,rig:RigProfile=RIG):RobotContact[] {
+  const ik=solveIK(tool,toolYaw,rig);
+  const shoulder=add(rig.yaw,ry(sub(rig.shoulder,rig.yaw),ik.yaw));
+  const elbow=add(shoulder,ry(rx(sub(rig.elbow,rig.shoulder),ik.shoulder),ik.yaw));
+  const wrist=add(elbow,ry(rx(sub(rig.wrist,rig.elbow),ik.shoulder+ik.elbow),ik.yaw));
   const sh=world(shoulder),el=world(elbow),wr=world(wrist);
   const palm:Vec=[tool[0],tool[1]+.075,tool[2]];
   // Fingers spread along the gripper's roll axis; the grip decides span and fingertip depth.
@@ -40,8 +40,8 @@ export function robotContacts(tool:Vec,toolYaw:number,carry=false,grip:Grip=END_
   ];
 }
 /** True when the arm links (not the fingers) stay clear of an axis-aligned box around the tower. */
-export function armClearMany(tool:Vec,toolYaw:number,boxes:{min:Vec;max:Vec}[],margin=.01):boolean {
-  for(const c of robotContacts(tool,toolYaw).slice(0,4)){
+export function armClearMany(tool:Vec,toolYaw:number,boxes:{min:Vec;max:Vec}[],rig:RigProfile=RIG,margin=.01):boolean {
+  for(const c of robotContacts(tool,toolYaw,false,END_GRIP,rig).slice(0,4)){
     const {x,y,z,w}=c.q,d:Vec=[2*(x*y-w*z),1-2*(x*x+z*z),2*(y*z+w*x)];
     for(let i=0;i<=12;i++){
       const t=(i/6-1)*c.halfHeight,p=c.p.map((v,j)=>v+(d[j]??0)*t);
@@ -53,7 +53,7 @@ export function armClearMany(tool:Vec,toolYaw:number,boxes:{min:Vec;max:Vec}[],m
   }
   return true;
 }
-export function armClear(tool:Vec,toolYaw:number,box:{min:Vec;max:Vec},margin=.01):boolean {
-  return armClearMany(tool,toolYaw,[box],margin);
+export function armClear(tool:Vec,toolYaw:number,box:{min:Vec;max:Vec},rig:RigProfile=RIG,margin=.01):boolean {
+  return armClearMany(tool,toolYaw,[box],rig,margin);
 }
 

@@ -1,7 +1,6 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { MeshoptSimplifier } from "three/examples/jsm/libs/meshopt_simplifier.module.js";
@@ -9,7 +8,7 @@ import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ContactShadows, Environment, Lightformer, OrbitControls, useTexture } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { GRIPPER_CLOSE_TRAVEL, RIG, TAB, MAX_BARS, ROBOT_BASE, ROBOT_SCALE, createSim, solveIK, stepSim } from "@/lib/growth-sim";
+import { GRIPPER_CLOSE_TRAVEL, RIG, TAB, ROBOT_BASE, ROBOT_SCALE, createSim, rigProfileFromBones, solveIK, stepSim, type RigProfile, type Vec } from "@/lib/growth-sim";
 import { createDynamics } from "@/lib/growth-physics";
 import { lingotHullPoints, normalizeLingot } from "@/lib/lingot-geometry";
 import GalleryRoom from "./GalleryRoom";
@@ -38,19 +37,83 @@ function useConcreteTexture() {
 
 const modelBase = `${import.meta.env.BASE_URL}models/`;
 const robotGlbUrl = `${modelBase}kuka-kr210.glb`;
-const goldBarObjUrl = `${modelBase}gold-bar/gold-bar.obj`;
-const goldBarGlbUrl = `${modelBase}gold-bar/gold-bar.glb`;
-const robotTextureUrls = [
-  `${modelBase}robot-arm/robot-color.png`,
-  `${modelBase}robot-arm/robot-normal.png`,
-  `${modelBase}robot-arm/robot-roughness.png`,
-];
+const goldBarGlbUrl = `${modelBase}gold-bar.glb`;
 const goldTextureUrls = [
   `${modelBase}gold-bar/material/color.jpg`,
   `${modelBase}gold-bar/material/normal.jpg`,
   `${modelBase}gold-bar/material/roughness.jpg`,
   `${modelBase}gold-bar/material/metalness.jpg`,
 ] as string[];
+const robotJointNames = ["Track", "Base", "A1", "A2", "A3", "A4", "A5", "A6", "Tool", "JawL", "JawR"] as const;
+type RobotJointName = typeof robotJointNames[number];
+type RobotRigData = {
+  joints:Map<RobotJointName,THREE.Object3D>;
+  restQuaternion:Map<RobotJointName,THREE.Quaternion>;
+  restPosition:Map<RobotJointName,THREE.Vector3>;
+  axes:{
+    yaw:THREE.Vector3; shoulder:THREE.Vector3; elbow:THREE.Vector3; wrist:THREE.Vector3; roll:THREE.Vector3;
+    jawL:THREE.Vector3; jawR:THREE.Vector3;
+  };
+};
+const robotRigProfiles = new WeakMap<THREE.Group, RigProfile>();
+const robotRigData = new WeakMap<THREE.Group, RobotRigData>();
+
+function prepareRobot(scene: THREE.Group) {
+  scene.updateMatrixWorld(true);
+  const joints = new Map<RobotJointName, THREE.Object3D>();
+  scene.traverse((object) => {
+    if (robotJointNames.includes(object.name as RobotJointName)) {
+      joints.set(object.name as RobotJointName, object);
+    }
+    if ((object as THREE.Mesh).isMesh) {
+      const mesh = object as THREE.Mesh;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+    }
+  });
+  for (const name of robotJointNames) {
+    if (!joints.has(name)) throw new Error(`Missing ${name} joint in ${robotGlbUrl}`);
+  }
+  const joint = (name:RobotJointName) => joints.get(name)!;
+  const worldPosition = (name:RobotJointName) => joint(name).getWorldPosition(new THREE.Vector3());
+  const tuple = (v:THREE.Vector3):Vec => [v.x,v.y,v.z];
+  const rigPoints = {
+    track:tuple(worldPosition("Track")),
+    a1:tuple(worldPosition("A1")),
+    a2:tuple(worldPosition("A2")),
+    a3:tuple(worldPosition("A3")),
+    a5:tuple(worldPosition("A5")),
+    tool:tuple(worldPosition("Tool")),
+  };
+  robotRigProfiles.set(scene,rigProfileFromBones(rigPoints));
+  const axisInJointFrame = (name:RobotJointName,axis:THREE.Vector3) =>
+    axis.clone().applyQuaternion(joint(name).getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+  const meshCenter = (name:string) => {
+    const mesh = scene.getObjectByName(name) as THREE.Mesh | undefined;
+    if (!mesh?.isMesh) throw new Error(`Missing ${name} mesh in ${robotGlbUrl}`);
+    mesh.geometry.computeBoundingBox();
+    return mesh.geometry.boundingBox!.getCenter(new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+  };
+  const jawAxis = meshCenter("KUKA_JawR").sub(meshCenter("KUKA_JawL")).normalize();
+  const toParent = (name:RobotJointName,axis:THREE.Vector3) =>
+    axis.clone().applyQuaternion(joint(name).parent?.getWorldQuaternion(new THREE.Quaternion()).invert() ?? new THREE.Quaternion()).normalize();
+  robotRigData.set(scene,{
+    joints,
+    restQuaternion:new Map(robotJointNames.map(name=>[name,joint(name).quaternion.clone()])),
+    restPosition:new Map(robotJointNames.map(name=>[name,joint(name).position.clone()])),
+    axes:{
+      yaw:axisInJointFrame("A1",new THREE.Vector3(0,1,0)),
+      shoulder:axisInJointFrame("A2",new THREE.Vector3(0,0,1)),
+      elbow:axisInJointFrame("A3",new THREE.Vector3(0,0,1)),
+      wrist:axisInJointFrame("A5",new THREE.Vector3(0,0,1)),
+      roll:axisInJointFrame("A6",worldPosition("Tool").sub(worldPosition("A5")).normalize()),
+      jawL:toParent("JawL",jawAxis),
+      jawR:toParent("JawR",jawAxis),
+    },
+  });
+  return scene;
+}
 
 function useGoldMaterial() {
   const textures = useTexture(goldTextureUrls) as THREE.Texture[];
@@ -79,30 +142,24 @@ function useOptionalRobot() {
     dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/gltf/`);
     const loader = new GLTFLoader();
     loader.setDRACOLoader(dracoLoader);
-    loader.load(robotGlbUrl, gltf => { if (live) setObject(gltf.scene); }, undefined, () => { if (live) setObject(null); });
-    return () => { live = false; dracoLoader.dispose(); };
+    loader.load(robotGlbUrl, (gltf) => {
+      try {
+        const scene = prepareRobot(gltf.scene);
+        if (live) setObject(scene);
+      } catch (error) {
+        console.error(`Could not prepare the KUKA rig from ${robotGlbUrl}`, error);
+        if (live) setObject(null);
+      }
+    }, undefined, (error) => {
+      console.error(`Could not load the KUKA rig from ${robotGlbUrl}`, error);
+      if (live) setObject(null);
+    });
+    return () => {
+      live = false;
+      dracoLoader.dispose();
+    };
   }, []);
   return object;
-}
-
-function useOptionalRobotTextures() {
-  const [textures, setTextures] = useState<THREE.Texture[] | null>(null);
-  useEffect(() => {
-    let live = true, failed = false, remaining = robotTextureUrls.length;
-    const loaded: (THREE.Texture | undefined)[] = [];
-    const loader = new THREE.TextureLoader();
-    robotTextureUrls.forEach((url, index) => loader.load(url, texture => {
-      if (!live) { texture.dispose(); return; }
-      loaded[index] = texture;
-      remaining--;
-      if (!failed && remaining === 0) setTextures(loaded as THREE.Texture[]);
-    }, undefined, () => {
-      failed = true;
-      if (live) setTextures(null);
-    }));
-    return () => { live = false; loaded.forEach(texture => texture?.dispose()); };
-  }, []);
-  return textures;
 }
 
 function useLingotGeometry() {
@@ -139,9 +196,10 @@ function useLingotGeometry() {
           reduced.userData["preserveNormals"] = true;
           if (live) setSource(reduced);
           else reduced.dispose();
-        } catch {
+        } catch (error) {
           if (reduced) reduced.dispose();
           else geometry.dispose();
+          console.warn(`Could not optimize the gold-bar mesh from ${goldBarGlbUrl}; using fallback geometry.`, error);
           if (live) setSource(null);
         }
       })();
@@ -164,14 +222,8 @@ function useLingotGeometry() {
       if (geometry) optimize(geometry);
       else if (live) setSource(null);
     }, undefined, () => {
-      new OBJLoader().load(goldBarObjUrl, object => {
-        let geometry: THREE.BufferGeometry | undefined;
-        object.traverse(child => {
-          if (!geometry && (child as THREE.Mesh).isMesh) geometry = (child as THREE.Mesh).geometry.clone();
-        });
-        if (geometry) optimize(geometry);
-        else if (live) setSource(null);
-      }, undefined, () => { if (live) setSource(null); });
+      console.error(`Could not load the supplied gold-bar model from ${goldBarGlbUrl}`);
+      if (live) setSource(null);
     });
     return () => { live = false; dracoLoader.dispose(); };
   }, []);
@@ -182,98 +234,45 @@ function useLingotGeometry() {
   return geometry;
 }
 
-function AxisLink({ to, radius, material }: { to: [number, number, number]; radius: number; material: THREE.Material }) {
-  const pose = useMemo(() => {
-    const vector = new THREE.Vector3(...to), length = vector.length();
+function Robot({ sim, obj }: { sim: ReturnType<typeof createSim>; obj:THREE.Group|null }) {
+  const rig = useMemo(() => {
+    if (!obj) return null;
+    const data = robotRigData.get(obj);
+    if (!data) throw new Error(`Missing live joint data in ${robotGlbUrl}`);
+    const find = (name:RobotJointName) => data.joints.get(name)!;
     return {
-      position: [vector.x / 2, vector.y / 2, vector.z / 2] as [number, number, number],
-      quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), vector.normalize()),
-      length,
+      A1: find("A1"), A2: find("A2"), A3: find("A3"), A5: find("A5"), A6: find("A6"),
+      jawL: find("JawL"), jawR: find("JawR"), axes:data.axes,
+      rest: {
+        A1: data.restQuaternion.get("A1")!, A2: data.restQuaternion.get("A2")!,
+        A3: data.restQuaternion.get("A3")!, A5: data.restQuaternion.get("A5")!,
+        A6: data.restQuaternion.get("A6")!, jawL: data.restPosition.get("JawL")!,
+        jawR: data.restPosition.get("JawR")!,
+      },
     };
-  }, [to[0], to[1], to[2]]);
-  return <mesh position={pose.position} quaternion={pose.quaternion} material={material} castShadow receiveShadow>
-    <cylinderGeometry args={[radius, radius, pose.length, 16]} />
-  </mesh>;
-}
-
-
-function Robot({ sim }: { sim: ReturnType<typeof createSim> }) {
-  const obj = useOptionalRobot();
-  const tex = useOptionalRobotTextures();
-  const [map, normalMap, roughnessMap] = tex ?? [];
-  const material = useMemo(() => {
-    if (map && normalMap && roughnessMap) {
-      map.colorSpace = THREE.SRGBColorSpace;
-      for (const t of [map, normalMap, roughnessMap]) t.anisotropy = 8;
-      return new THREE.MeshPhysicalMaterial({
-        map, normalMap, roughnessMap, roughness: 1, metalness: 0.2, clearcoat: 0.35, clearcoatRoughness: 0.3,
-      });
-    }
-    return new THREE.MeshPhysicalMaterial({ color: "#737d82", roughness: 0.34, metalness: 0.72, clearcoat: 0.3 });
-  }, [map, normalMap, roughnessMap]);
-  const parts = useMemo(() => {
-    if (!obj) return {};
-    const out: Record<string, THREE.Mesh> = {};
-    obj.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) {
-        const m = (o as THREE.Mesh).clone();
-        m.material = material; m.castShadow = true; m.receiveShadow = true;
-        out[o.name] = m;
-        if (o.name.includes("A1")) out["robot_arm"] = m;
-        if (o.name.includes("A2")) out["robot_arm_large"] = m;
-        if (o.name.includes("A3")) out["Robot_arm_2"] = m;
-        if (o.name.includes("A4")) out["robot_arm_end"] = m;
-        if (o.name.includes("Base")) out["robot_arm_base"] = m;
-        if (o.name.includes("Grabber_hand_1") || o.name.includes("Jaw.L")) out["Grabber_hand_1"] = m;
-        if (o.name.includes("Grabber_hand_2") || o.name.includes("Jaw.R")) out["Grabber_hand_2"] = m;
-        if (o.name.includes("Grabber") || o.name.includes("Tool")) out["Grabber"] = m;
-      }
-    });
-    return out;
-  }, [obj, material]);
-  useEffect(() => () => material.dispose(), [material]);
-  const base = useRef<THREE.Group>(null);
-  const sh = useRef<THREE.Group>(null);
-  const el = useRef<THREE.Group>(null);
-  const wr = useRef<THREE.Group>(null);
-  const roll = useRef<THREE.Group>(null);
-  const f1 = useRef<THREE.Group>(null);
-  const f2 = useRef<THREE.Group>(null);
+  }, [obj]);
+  const rotation = useMemo(() => new THREE.Quaternion(), []);
   useFrame(() => {
-    if (!base.current || !sh.current || !el.current || !wr.current || !roll.current || !f1.current || !f2.current) return;
-    const ik = solveIK(sim.tool, sim.toolYaw);
-    base.current.rotation.y = ik.yaw;
-    sh.current.rotation.x = ik.shoulder;
-    el.current.rotation.x = ik.elbow;
-    wr.current.rotation.x = ik.wrist;
-    roll.current.rotation.y = ik.roll;
+    const ik = solveIK(sim.tool, sim.toolYaw,sim.rig);
     const close = (sim.carry || sim.closed) ? GRIPPER_CLOSE_TRAVEL : 0;
-    f1.current.position.x = close;
-    f2.current.position.x = -close;
+    if (rig) {
+      rotation.setFromAxisAngle(rig.axes.yaw, ik.yaw);
+      rig.A1.quaternion.copy(rig.rest.A1).multiply(rotation);
+      rotation.setFromAxisAngle(rig.axes.shoulder, ik.shoulder);
+      rig.A2.quaternion.copy(rig.rest.A2).multiply(rotation);
+      rotation.setFromAxisAngle(rig.axes.elbow, ik.elbow);
+      rig.A3.quaternion.copy(rig.rest.A3).multiply(rotation);
+      rotation.setFromAxisAngle(rig.axes.wrist, ik.wrist);
+      rig.A5.quaternion.copy(rig.rest.A5).multiply(rotation);
+      rotation.setFromAxisAngle(rig.axes.roll, ik.roll);
+      rig.A6.quaternion.copy(rig.rest.A6).multiply(rotation);
+      rig.jawL.position.copy(rig.rest.jawL).addScaledVector(rig.axes.jawL, close);
+      rig.jawR.position.copy(rig.rest.jawR).addScaledVector(rig.axes.jawR, -close);
+    }
   });
-  const sub = (a: [number, number, number], b: [number, number, number]): [number, number, number] => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-  const neg = (a: [number, number, number]): [number, number, number] => [-a[0], -a[1], -a[2]];
-  const P = (name: string, pivot: [number, number, number]) => parts[name] && <primitive object={parts[name]} position={neg(pivot)} />;
   return (
     <group position={[ROBOT_BASE.x, ROBOT_BASE.y, ROBOT_BASE.z]} scale={ROBOT_SCALE}>
-      <group position={neg(RIG.yaw)}>{obj ? P("robot_arm_base", [0, 0, 0]) : <mesh position={[0, .07, 0]} material={material} castShadow><cylinderGeometry args={[.25, .3, .14, 24]} /></mesh>}</group>
-      <group ref={base}>
-        {obj ? P("robot_arm", RIG.yaw) : <AxisLink to={sub(RIG.shoulder, RIG.yaw)} radius={.14} material={material} />}
-        <group ref={sh} position={sub(RIG.shoulder, RIG.yaw)}>
-          {obj ? P("robot_arm_large", RIG.shoulder) : <AxisLink to={sub(RIG.elbow, RIG.shoulder)} radius={.12} material={material} />}
-          <group ref={el} position={sub(RIG.elbow, RIG.shoulder)}>
-            {obj ? P("Robot_arm_2", RIG.elbow) : <AxisLink to={sub(RIG.wrist, RIG.elbow)} radius={.085} material={material} />}
-            <group ref={wr} position={sub(RIG.wrist, RIG.elbow)}>
-              <group ref={roll}>
-                {obj ? P("robot_arm_end", RIG.wrist) : <AxisLink to={sub(RIG.roll, RIG.wrist)} radius={.06} material={material} />}
-                {obj ? P("Grabber", RIG.wrist) : <mesh position={[0, -.04, 0]} material={material} castShadow><boxGeometry args={[.24, .08, .18]} /></mesh>}
-                <group ref={f1}>{obj ? P("Grabber_hand_1", RIG.wrist) : <mesh position={[0, -.13, 0]} material={material} castShadow><boxGeometry args={[.035, .2, .035]} /></mesh>}</group>
-                <group ref={f2}>{obj ? P("Grabber_hand_2", RIG.wrist) : <mesh position={[0, -.13, 0]} material={material} castShadow><boxGeometry args={[.035, .2, .035]} /></mesh>}</group>
-              </group>
-            </group>
-          </group>
-        </group>
-      </group>
+      {obj ? <group rotation-y={Math.PI / 2}><primitive object={obj} /></group> : null}
     </group>
   );
 }
@@ -296,7 +295,7 @@ function Bars({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometry: 
     mesh.instanceMatrix.needsUpdate = true;
   });
   return (
-    <instancedMesh ref={instances} args={[geometry, material, MAX_BARS]} castShadow receiveShadow frustumCulled={false} />
+    <instancedMesh ref={instances} args={[geometry, material, sim.bars.length]} castShadow receiveShadow frustumCulled={false} />
   );
 }
 
@@ -340,7 +339,8 @@ function Stepper({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometr
 function World() {
   const floorTex = useConcreteTexture();
   const lingotGeometry = useLingotGeometry();
-  const sim = useMemo(() => createSim(), []);
+  const obj = useOptionalRobot();
+  const sim = useMemo(() => createSim(Math.random,obj ? robotRigProfiles.get(obj) ?? RIG : RIG), [obj]);
   const { camera, size } = useThree();
   useEffect(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
@@ -373,7 +373,7 @@ function World() {
       <ContactShadows position={[0, 0.002, 0]} scale={10} blur={2.5} opacity={0.5} far={2} />
 
       <Suspense fallback={null}>
-        <Robot sim={sim} />
+        <Robot sim={sim} obj={obj} />
         <Bars sim={sim} geometry={lingotGeometry} />
         <PushTab sim={sim} />
         <Stepper sim={sim} geometry={lingotGeometry} />
@@ -394,7 +394,7 @@ export default function GrowthScene() {
       <Canvas
         shadows
         dpr={[1, 2]}
-        camera={{ position: [1.4, 1.4, 2.6], fov: 42, near: 0.05, far: 60 }}
+        camera={{ position: [3.94, 2.9, 8.36], fov: 42, near: 0.05, far: 60 }}
         gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       >
         <World />
