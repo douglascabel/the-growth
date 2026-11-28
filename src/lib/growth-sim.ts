@@ -67,10 +67,15 @@ export type RigBonePositions = { track:Vec; a1:Vec; a2:Vec; a3:Vec; a5:Vec; tool
 /** Gold bars are solid metal rigid bodies: gold density, high metal-on-metal friction, a dull clink. */
 export const GOLD_DENSITY = 19300;
 export const BAR_RESTITUTION = .02;
+/** Steel-trowelled concrete floor against gold: slightly less grip than metal on metal, a low bounce. */
+export const CONCRETE_FRICTION = .5;
+export const CONCRETE_RESTITUTION = .18;
 export type Placement = { x:number; z:number; yaw:number; layer:number; slot:number };
 export type Bar = { p:Vec; yaw:number; pitch:number; roll:number; visible:boolean; layer:number; slot:number; inTower:boolean; q?:Quat; loose?:boolean };
 export type Bounds={min:Vec;max:Vec};
-export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[],routes?:{index:number;side:number}[])=>number|undefined; armClear?:(tool:Vec,yaw:number,box:Bounds,rig?:RigProfile,tilt?:number)=>boolean; armClearMany?:(tool:Vec,yaw:number,boxes:Bounds[],rig?:RigProfile,tilt?:number)=>boolean };
+export type Dynamics = { reset:()=>void; step:(s:Sim,dt:number)=>boolean; settled:()=>boolean; chooseRemoval?:(s:Sim,candidates:number[],routes?:{index:number;side:number}[])=>number|undefined;
+  /** Incremental push probe of one bar; each next() advances a few physics steps. */
+  probe?:(s:Sim,index:number,side:number)=>Generator<void,{index:number;stable:boolean;motion:number}|undefined,void>; armClear?:(tool:Vec,yaw:number,box:Bounds,rig?:RigProfile,tilt?:number)=>boolean; armClearMany?:(tool:Vec,yaw:number,boxes:Bounds[],rig?:RigProfile,tilt?:number)=>boolean };
 export type Sim = {
   t:number; phase:'settle'|'build'|'remove'|'collapse'|'rest'; phaseT:number;
   placed:number; bars:Bar[]; plan:Placement[]; carry:boolean; tool:Vec; toolYaw:number;
@@ -82,6 +87,10 @@ export type Sim = {
   generation:number; source?:{p:Vec;yaw:number;q?:Quat;entry:Vec;entryYaw:number;entryTilt:number;along?:number;dy?:number;yawOffset?:number;pushed?:number}; released:boolean;
   mode:'push'; side:number; pushing:boolean; closed:boolean; recoveryHistory:number[]; blocked:number;
   removalScores?:{index:number;stable:boolean;motion:number}[];
+  /** In-progress removal choice and its per-frame time budget in ms (Infinity: decide at once). */
+  planner?:Generator<void,void,void>; planBudget:number;
+  /** Velocity a just-released bar starts falling with; the physics adapter consumes it. */
+  releaseKick?:{index:number;v:Vec;w:Vec};
   /** Current pad half-gap; renderer and physics fingers both follow it. */
   jaw:number; nextRemovalCheck:number;
 };
@@ -108,7 +117,7 @@ export function createSim(random=Math.random,rig:RigProfile=RIG):Sim {
     return {p:[PILE.x+(col-5.5)*.065+(noise()-.5)*.04,.085+noise()*.08,PILE.z+(row-(rows-1)/2)*.07+(noise()-.5)*.05],yaw,pitch,roll,
       q:{x:sx*cy*cz+cx*sy*sz,y:cx*sy*cz-sx*cy*sz,z:cx*cy*sz+sx*sy*cz,w:cx*cy*cz-sx*sy*sz},visible:true,layer:-1,slot:-1,inTower:false};
   });
-  return {t:0,phase:'settle',phaseT:0,placed:0,bars,plan:Array.from({length:barCount},(_,i)=>placement(i)),carry:false,tool:[...REST_TOOL],toolYaw:0,toolTilt:0,active:-1,moves:0,removalHistory:[],random,tower:{...TOWER},layers,generation:0,released:false,mode:'push',side:1,pushing:false,blocked:0,closed:false,recoveryHistory:[],jaw:GRIPPER_OPEN_HALF_GAP,nextRemovalCheck:0,rig};
+  return {t:0,phase:'settle',phaseT:0,placed:0,bars,plan:Array.from({length:barCount},(_,i)=>placement(i)),carry:false,tool:[...REST_TOOL],toolYaw:0,toolTilt:0,active:-1,moves:0,removalHistory:[],random,tower:{...TOWER},layers,generation:0,released:false,mode:'push',side:1,pushing:false,blocked:0,planBudget:Infinity,closed:false,recoveryHistory:[],jaw:GRIPPER_OPEN_HALF_GAP,nextRemovalCheck:0,rig};
 }
 /** Support-footprint margin at every layer, including the centre of mass above it. */
 export function supportMargin(s:Sim,exclude:number):number {
@@ -147,9 +156,11 @@ export function strategicCandidates(s:Sim):number[] {
   const all=eligibleBars(s).filter(i=>{const b=s.bars[i];return !!b&&freeSide(s,b)!==0&&lateral(b.p,b.yaw);});
   // Start just below the protected top story.  A short push there has far less
   // load above it than a deep support, while the completed top remains intact.
-  const margin=(i:number)=>supportMargin(s,i)>.01?1:0;
+  // Each support margin walks the whole tower: work it out once per bar, not per comparison.
+  const margins=new Map(all.map(i=>[i,supportMargin(s,i)])),m=(i:number)=>margins.get(i)??0;
+  const margin=(i:number)=>m(i)>.01?1:0;
   const loose=(i:number)=>s.bars[i]?.loose?1:0;
-  return all.sort((a,b)=>margin(b)-margin(a)||loose(b)-loose(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||supportMargin(s,b)-supportMargin(s,a));
+  return all.sort((a,b)=>margin(b)-margin(a)||loose(b)-loose(a)||(s.bars[b]?.layer??0)-(s.bars[a]?.layer??0)||m(b)-m(a));
 }
 const smooth=(x:number)=>{const t=Math.min(1,Math.max(0,x));return t*t*(3-2*t);};
 const mix=(a:number,b:number,t:number)=>a+(b-a)*t;
@@ -324,11 +335,13 @@ function extractionPoses(s:Sim,b:Bar,side:number):{p:Vec;t:Vec}[] {
   const {poses,awayHigh,approachHigh}=removalFrame(s,b,side);
   return [awayHigh,poses.away,poses.contact,poses.pushed,approachHigh,poses.approach,poses.pinch,poses.pulled];
 }
-function clearExtractionPath(path:{p:Vec;t:Vec}[],obstacles:Bounds[],armClear:Dynamics['armClear'],armClearMany:Dynamics['armClearMany'],rig:RigProfile):boolean {
+function* clearExtractionPath(path:{p:Vec;t:Vec}[],obstacles:Bounds[],armClear:Dynamics['armClear'],armClearMany:Dynamics['armClearMany'],rig:RigProfile):Generator<void,boolean,void> {
   for(let i=0;i<path.length-1;i++){
+    yield;
     const a=path[i],b=path[i+1];if(!a||!b)continue;
     const steps=Math.max(1,Math.ceil(Math.hypot(b.p[0]-a.p[0],b.p[1]-a.p[1],b.p[2]-a.p[2])/.02));
     for(let n=0;n<=steps;n++){
+      if(n)yield;
       const u=n/steps,p:Vec=[a.p[0]+(b.p[0]-a.p[0])*u,a.p[1]+(b.p[1]-a.p[1])*u,a.p[2]+(b.p[2]-a.p[2])*u],yaw=toolYawFacing(u<.5?a.t:b.t);
       if(!canReachPose(p,yaw,Math.PI/2,rig)||armClearMany&&!armClearMany(p,yaw,obstacles,rig,Math.PI/2)||!armClearMany&&armClear&&obstacles.some(box=>!armClear(p,yaw,box,rig,Math.PI/2)))return false;
     }
@@ -346,19 +359,30 @@ function barBounds(b:Bar):{min:Vec;max:Vec} {
 }
 /** After this many fruitless checks the robot takes the least risky move, or unstacks what stands. */
 const PATIENCE=3;
-function beginRemoval(s:Sim) {
-  // Deconstruction: push an outer bar's end from the side with one fingertip, walk round
-  // the tower, grip the end that now protrudes, pull it straight out and let it fall.
+export type RemovalScore={index:number;stable:boolean;motion:number};
+/**
+ * Choose the next extraction a little at a time: the route checks and Rapier probes are
+ * a generator the robot advances within a per-frame budget, so choosing never stalls a frame.
+ */
+function* planRemoval(s:Sim):Generator<void,void,void> {
+  // Deconstruction: push a bar's end from the side with one fingertip, cross over the
+  // tower, grip the end that now protrudes, pull it straight out and let it fall.
   const tower=s.bars.filter(b=>b.inTower);
-  const clearSides=new Map<number,number[]>(),reachableSides=new Map<number,number[]>(),ranked=strategicCandidates(s);
-  for(const i of ranked.slice(0,12)){
+  // A person's choice is not a strict ranking: jitter it so any reasonable bar can come next.
+  yield;
+  const ranked=strategicCandidates(s);
+  yield;
+  const pool=ranked.slice(0,16).map((index,rank)=>({index,key:rank+s.random()*CHOICE_SPREAD}))
+    .sort((a,b)=>a.key-b.key).map(item=>item.index);
+  const clearSides=new Map<number,number[]>(),reachableSides=new Map<number,number[]>();
+  for(const i of pool){
     const b=s.bars[i];if(!b)continue;
     // Check the real gaps between bars, excluding the bar the hand works on.
     const obstacles=tower.filter(item=>item!==b).map(barBounds);
     const reachable=[1,-1].filter(side=>extractionPoses(s,b,side).every(pose=>canReachPose(pose.p,toolYawFacing(pose.t),Math.PI/2,s.rig)));
     if(reachable.length)reachableSides.set(i,reachable);
-    const armClear=s.physics?.armClear,armClearMany=s.physics?.armClearMany;
-    const clear=reachable.filter(side=>clearExtractionPath(extractionPoses(s,b,side),obstacles,armClear,armClearMany,s.rig));
+    const armClear=s.physics?.armClear,armClearMany=s.physics?.armClearMany,clear:number[]=[];
+    for(const side of reachable){if(yield* clearExtractionPath(extractionPoses(s,b,side),obstacles,armClear,armClearMany,s.rig))clear.push(side);}
     if(clear.length)clearSides.set(i,clear);
     if(clearSides.size>=6)break;
   }
@@ -367,8 +391,23 @@ function beginRemoval(s:Sim) {
   const sides=clearSides.size?clearSides:reachableSides;
   if(!sides.size){if(s.blocked>=PATIENCE){s.phase='rest';s.phaseT=0;}return;}
   const eligible=[...sides.keys()];
-  const routes=eligible.map(index=>{const options=sides.get(index)??[1,-1];return {index,side:options.length>1?1:(options[0]??1)};});
-  let i=s.physics?.chooseRemoval?s.physics.chooseRemoval(s,eligible,routes):eligible[0];
+  // Either end may be pushed when both routes are open.
+  const routes=eligible.map(index=>{const options=sides.get(index)??[1,-1];return {index,side:options[options.length>1&&s.random()<.5?1:0]??1};});
+  let i:number|undefined;
+  const probe=s.physics?.probe;
+  if(probe){
+    const scores:RemovalScore[]=[];
+    for(const route of routes.slice(0,PROBES)){
+      const run=probe(s,route.index,route.side);let step=run.next();
+      while(!step.done){yield;step=run.next();}
+      if(step.value)scores.push(step.value);
+    }
+    s.removalScores=scores;
+    // Among the moves the probe calls safe, prefer gentler ones but leave room for chance.
+    const stable=scores.filter(score=>score.stable),weights=stable.map(score=>1/(score.motion+.01));
+    let pick=s.random()*weights.reduce((sum,w)=>sum+w,0);
+    i=stable.find((_,n)=>(pick-=weights[n]??0)<=0)?.index??stable[0]?.index;
+  }else i=s.physics?.chooseRemoval?s.physics.chooseRemoval(s,eligible,routes):eligible[0];
   // Nothing passes the stability probe any more: make the gentlest move and let physics decide.
   if(i===undefined&&s.blocked>=PATIENCE)i=s.removalScores?.slice().sort((a,b)=>a.motion-b.motion)[0]?.index??eligible[0];
   if(i===undefined)return;
@@ -376,10 +415,18 @@ function beginRemoval(s:Sim) {
   s.active=i;s.phaseT=0;s.removalHistory.push(i);rememberSource(s,b);s.blocked=0;
   s.mode='push';s.side=routes.find(route=>route.index===i)?.side??1;
 }
+/** How many ranks a candidate may jump in the jittered order. */
+const CHOICE_SPREAD=6;
+/** Physics probes per decision. */
+const PROBES=3;
+const now=()=>globalThis.performance?.now()??Date.now();
 function stepRemove(s:Sim) {
   if(s.active<0){
-    if(s.phaseT<s.nextRemovalCheck)return;
-    beginRemoval(s);
+    if(!s.planner){if(s.phaseT<s.nextRemovalCheck)return;s.planner=planRemoval(s);}
+    const until=now()+s.planBudget;let done=false;
+    for(;;){if(s.planner.next().done){done=true;break;}if(now()>=until)break;}
+    if(!done)return;
+    delete s.planner;
     // Retry soon after normal contact settling instead of leaving the arm parked
     // at the construction handoff when a candidate is temporarily unavailable.
     if(s.active<0){s.nextRemovalCheck=s.phaseT+2;s.blocked++;}
@@ -413,8 +460,15 @@ function stepRemove(s:Sim) {
   }
   if(s.carry)follow(s,b,1,grip(s,b),source.dy,source.yawOffset);
   if(k>=.82&&!s.released){
-    // Let go: the bar is out of the tower and drops to the floor under gravity.
+    // Let go: the bar is out of the tower and drops to the floor under gravity. The pads
+    // free the held end a moment late, so the far end noses down and it carries a little
+    // of the pull; no two drops are alike.
     s.released=true;b.inTower=false;b.layer=-1;b.slot=-1;
+    const held=Math.sign(source.along??1),d=barAxis(b.yaw),free:Vec=[-d[0]*held,0,-d[2]*held];
+    const pitch=1.5+s.random()*2.5,roll=(s.random()-.5)*2,drift=.08+s.random()*.15;
+    s.releaseKick={index:s.active,v:[a[0]*drift,-.05,a[2]*drift],
+      // up x free tips the free end down; a little roll about the length adds a twist.
+      w:[-free[2]*pitch+d[0]*roll,0,free[0]*pitch+d[2]*roll]};
   }
   if(k>=1){
     s.phaseT=0;s.carry=false;s.closed=false;s.pushing=false;delete s.source;s.active=-1;s.nextRemovalCheck=0;
@@ -437,7 +491,7 @@ export function restartFromPile(s:Sim) {
   for(const b of s.bars){b.inTower=false;b.layer=-1;b.slot=-1;}
   // Rebuild Rapier from the recorded fallen poses; no bar is respawned or moved.
   s.physics?.reset();
-  s.phase='build';s.phaseT=0;s.placed=0;s.active=-1;s.moves=0;s.carry=false;s.closed=false;delete s.source;s.pushing=false;s.blocked=0;s.nextRemovalCheck=0;
+  s.phase='build';s.phaseT=0;s.placed=0;s.active=-1;s.moves=0;s.carry=false;s.closed=false;delete s.source;delete s.planner;s.pushing=false;s.blocked=0;s.nextRemovalCheck=0;
   s.plan=Array.from({length:s.bars.length},(_,i)=>placement(i,s.tower));
 }
 export function stepSim(s:Sim,dtRaw:number) {
@@ -452,7 +506,7 @@ export function stepSim(s:Sim,dtRaw:number) {
   const target=s.carry||s.closed?GRIPPER_CLOSED_HALF_GAP:GRIPPER_OPEN_HALF_GAP,travel=GRIPPER_JAW_SPEED*dt;
   s.jaw=Math.abs(target-s.jaw)<=travel?target:s.jaw+Math.sign(target-s.jaw)*travel;
   const fallen=s.physics?.step(s,dt);
-  if(fallen&&(s.phase==='remove'||s.phase==='build')&&s.placed>=6){s.phase='collapse';s.phaseT=0;s.carry=false;s.closed=false;s.active=-1;delete s.source;s.pushing=false;s.blocked=0;s.nextRemovalCheck=0;}
+  if(fallen&&(s.phase==='remove'||s.phase==='build')&&s.placed>=6){s.phase='collapse';s.phaseT=0;s.carry=false;s.closed=false;s.active=-1;delete s.source;delete s.planner;s.pushing=false;s.blocked=0;s.nextRemovalCheck=0;}
   if(s.phase==='collapse'&&s.phaseT>4&&(s.physics?.settled()??true)){s.phase='rest';s.phaseT=0;}
   else if(s.phase==='rest'&&s.phaseT>2)restartFromPile(s);
 }

@@ -44,4 +44,6 @@ use the editor.
 - Deconstruction is a horizontal-hand side push of a bar with a free lane beside it (outer bars, or a middle bar once a neighbour is gone), a crossing over the tower top, a grip of the protruding end from the opposite side, a straight pull and a drop to the floor. Bars are never restacked on top.
 - IK is six-axis (A4 forearm roll, A5 bend kept ≤ 0, A6 flange roll) driven by `toolYaw` and `toolTilt`; renderer and Rapier contacts both use it.
 - Hide the authored arrow meshes `Clamp.lever` and `A6-Lever`; they are annotations, not hardware.
-- Rank removals by support margins and probe Rapier snapshots before extraction; preserve the visible world's poses while choosing the least destabilizing support.
+- Rank removals by support margins and probe Rapier snapshots before extraction; preserve the visible world's poses. Jitter the ranking, the push side and the pick among stable probes with `sim.random` so choices feel human, not optimal.
+- Removal choice is a generator (`planRemoval`, physics `probe`) advanced within `sim.planBudget` ms per frame; never run route checks or probes as one blocking call in the live scene.
+- Metal stack physics: stiff contacts (natural frequency 800 Hz, 32 iterations) so the tower neither sags nor sways; damping only for bars in the tower, near zero for loose bars. Concrete floor: friction 0.5, restitution 0.18 (max-combined). Released bars get a nose-down tumble and a little of the pull.

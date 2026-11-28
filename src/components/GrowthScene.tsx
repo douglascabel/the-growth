@@ -35,6 +35,7 @@ function useConcreteTexture() {
   }, []);
 }
 
+const PLAN_BUDGET_MS = 4;
 const modelBase = `${import.meta.env.BASE_URL}models/`;
 const robotGlbUrl = `${modelBase}kuka-kr16-r2010.glb`;
 const goldBarGlbUrl = `${modelBase}gold-bar.glb`;
@@ -321,7 +322,12 @@ function World() {
   const floorTex = useConcreteTexture();
   const lingotGeometry = useLingotGeometry();
   const obj = useOptionalRobot();
-  const sim = useMemo(() => createSim(Math.random,obj ? robotRigProfiles.get(obj) ?? RIG : RIG), [obj]);
+  const sim = useMemo(() => {
+    const next = createSim(Math.random,obj ? robotRigProfiles.get(obj) ?? RIG : RIG);
+    // Think about the next bar a few milliseconds per frame, never in one long stall.
+    next.planBudget = PLAN_BUDGET_MS;
+    return next;
+  }, [obj]);
   const { camera, size } = useThree();
   useEffect(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) return;

@@ -68,11 +68,11 @@ describe('reach-limited sculpture',()=>{
    expect(eligibleBars(s)).not.toContain(MAX_BARS-1);
  });
  it('pushes one bar from the side with a horizontal closed hand',()=>{
-   const s=built();advance(s,1.6);const index=s.active;if(index<0)throw new Error('no safe removal was selected');
+   const s=built();s.random=()=>.1;advance(s,1.6);const index=s.active;if(index<0)throw new Error('no safe removal was selected');
    const bar=s.bars[index];if(!bar)throw new Error('missing bar');expect(bar.slot).not.toBe(1);
    let tested=false;
    for(let i=0;i<Math.ceil(REMOVE_CYCLE*60);i++){
-     stepSim(s,1/60);
+     stepWithHandPush(s);
      if(s.pushing){
        tested=true;expect(s.carry).toBe(false);expect(s.closed).toBe(true);expect(s.active).toBe(index);
        // The hand works level with the bar, pointing along it, never pressing down from above.
@@ -100,6 +100,22 @@ describe('reach-limited sculpture',()=>{
    expect(bar.inTower).toBe(false);expect(s.bars.filter(b=>b.inTower).length).toBe(MAX_BARS-1);
    expect(Math.hypot(bar.p[0]-start[0]!,bar.p[2]-start[2]!)).toBeGreaterThan(BAR.L/2+TOWER_HALF);
  });
+ it('does not always choose the same bar or the same push side',()=>{
+   const picks=new Set<string>();
+   for(const seed of [1,2,3,4,5,6,7,8]){
+     let r=seed;const s=built();s.random=()=>{r=(Math.imul(r,1664525)+1013904223)>>>0;return r/4294967296;};
+     s.physics={reset:()=>{},step:()=>false,settled:()=>true,chooseRemoval:(_state,candidates)=>candidates[0]};
+     advance(s,1.6);picks.add(`${s.active}:${s.side}`);
+   }
+   expect(picks.size).toBeGreaterThan(2);
+ });
+ it('drops a released bar with a tumble rather than straight down',()=>{
+   const s=built();s.random=()=>.1;advance(s,1.6);const index=s.active,bar=s.bars[index];if(index<0||!bar)throw new Error('no removal');
+   let kick:typeof s.releaseKick;
+   for(let i=0;i<Math.ceil((REMOVE_CYCLE+.2)*60)&&!kick;i++){stepWithHandPush(s);kick=s.releaseKick;}
+   if(!kick)throw new Error('no release');
+   expect(kick.index).toBe(index);expect(Math.hypot(...kick.w)).toBeGreaterThan(1);expect(Math.hypot(kick.v[0],kick.v[2])).toBeGreaterThan(.05);
+ });
  it('does not start a removal when the tower is out of reach',()=>{
    const s=built(),shift=2-TOWER.x;s.tower={x:ROBOT_BASE.x+2,z:TOWER.z};for(const b of s.bars)b.p=[b.p[0]+shift,b.p[1],b.p[2]];advance(s,2);
    expect(s.active).toBe(-1);expect(s.removalHistory).toHaveLength(0);
@@ -110,7 +126,8 @@ describe('reach-limited sculpture',()=>{
  });
  it('finds a reachable extraction route through the actual gaps between bars',async()=>{
    const s=built(),d=await createDynamics();s.random=()=>.1;
-   s.physics={...d,step:()=>false,settled:()=>true,chooseRemoval:(_state,candidates)=>candidates[0]};
+   // Route finding only: replace the Rapier probe with an approving stub.
+   const {probe:_probe,...routing}=d;s.physics={...routing,step:()=>false,settled:()=>true,chooseRemoval:(_state,candidates)=>candidates[0]};
    advance(s,1.6);expect(s.removalHistory).toHaveLength(1);expect(s.active).toBeGreaterThanOrEqual(0);
  });
  it('starts a physics-approved closed-hand push instead of parking at deconstruction',async()=>{

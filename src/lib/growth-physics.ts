@@ -1,5 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BAR, BAR_CONTACT, BAR_FRICTION, BAR_RESTITUTION, GOLD_DENSITY, PUSH_STROKE, SLIDE_FRICTION, type Dynamics } from './growth-sim';
+import { BAR, BAR_CONTACT, BAR_FRICTION, BAR_RESTITUTION, CONCRETE_FRICTION, CONCRETE_RESTITUTION, GOLD_DENSITY, PUSH_STROKE, SLIDE_FRICTION, type Dynamics, type Sim } from './growth-sim';
+const PROBE_ITERATIONS=24;
+const TOWER_DAMPING={linear:.85,angular:1.2},FREE_DAMPING={linear:.02,angular:.08};
 import { armClear, armClearMany, robotContacts } from './robot-kinematics';
 let ready:Promise<void>|undefined;
 export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
@@ -9,47 +11,58 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   let quietTime=0;
   let robot:RAPIER.RigidBody[]=[];
   const reset=()=>{
-    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});world.numSolverIterations=72;
-    world.integrationParameters.contact_natural_frequency=80;
+    world?.free();world=new RAPIER.World({x:0,y:-9.81,z:0});
+    // Solid metal: stiff contacts so a 1.3 m stack neither sags nor sways like rubber.
+    world.integrationParameters.contact_natural_frequency=800;world.numSolverIterations=32;
     world.integrationParameters.lengthUnit=.1;
     world.integrationParameters.normalizedAllowedLinearError=.0005;
     world.integrationParameters.normalizedPredictionDistance=.01;
     bodies=new Map();quietTime=0;robot=[];
-    world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.62).setRestitution(.005));
+    // Polished concrete: metal skids a little and gives a dull, short bounce.
+    world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(CONCRETE_FRICTION).setRestitution(CONCRETE_RESTITUTION).setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max));
   };reset();
-  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box,rig,tilt)=>armClear(tool,yaw,box,rig,.01,tilt),armClearMany:(tool,yaw,boxes,rig,tilt)=>armClearMany(tool,yaw,boxes,rig,.01,tilt),chooseRemoval(s,candidates,routes=[]){
-    const snapshot=world.takeSnapshot();
-    const scores:{index:number;stable:boolean;motion:number}[]=[];
-    // Probe the actual contact network without moving the visible world or pinning supports.
-    for(const index of candidates.slice(0,3)){
-      const original=bodies.get(index);if(!original)continue;
-      const pulled=RAPIER.World.restoreSnapshot(snapshot),moving=pulled.getRigidBody(original.handle),bar=s.bars[index];
-      if(!moving||!bar){pulled.free();continue;}
-      let motion=0,stable=true;
-      const observe=()=>{
-        for(const [i,body] of bodies){
-          const b=s.bars[i];if(!b?.inTower||i===index)continue;
-          const other=pulled.getRigidBody(body.handle);if(!other)continue;
-          const p=other.translation(),q=other.rotation(),displacement=Math.hypot(p.x-b.p[0],p.y-b.p[1],p.z-b.p[2]);
-          motion=Math.max(motion,displacement);
-          // A short push may settle adjacent bars by a few millimetres.  Reject
-          // only a meaningful shift or lean, which is the onset of a fall.
-          if(displacement>.06||1-2*(q.x*q.x+q.z*q.z)<.82)stable=false;
-        }
-      };
-      moving.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
-      // Probe the selected bar with the same short closed-hand push used live.
-      moving.collider(0).setCollisionGroups(0x00020001);moving.collider(0).setFriction(SLIDE_FRICTION);
-      const start=moving.translation(),side=routes.find(route=>route.index===index)?.side??1,yaw=bar.yaw;
-      const end={x:start.x+Math.cos(yaw)*side*PUSH_STROKE,y:start.y,z:start.z-Math.sin(yaw)*side*PUSH_STROKE};
-      pulled.timestep=1/120;
-      for(let n=1;n<=240;n++){
-        const u=n/240;moving.setNextKinematicTranslation({x:start.x+(end.x-start.x)*u,y:start.y,z:start.z+(end.z-start.z)*u});
-        pulled.step();observe();
+  /**
+   * Push one bar in a copy of the world and watch the rest of the tower. A generator: each
+   * next() runs a couple of coarse steps, so the live scene can spread a probe over frames.
+   */
+  function* probe(s:Sim,index:number,side:number):Generator<void,{index:number;stable:boolean;motion:number}|undefined,void> {
+    const original=bodies.get(index),bar=s.bars[index];if(!original||!bar)return undefined;
+    const pulled=RAPIER.World.restoreSnapshot(world.takeSnapshot()),moving=pulled.getRigidBody(original.handle);
+    if(!moving){pulled.free();return undefined;}
+    // A coarser solver than the live world is plenty to tell a settle from the onset of a fall.
+    pulled.numSolverIterations=PROBE_ITERATIONS;pulled.timestep=1/60;
+    let motion=0,stable=true;
+    const observe=()=>{
+      for(const [i,body] of bodies){
+        const b=s.bars[i];if(!b?.inTower||i===index)continue;
+        const other=pulled.getRigidBody(body.handle);if(!other)continue;
+        const p=other.translation(),q=other.rotation(),displacement=Math.hypot(p.x-b.p[0],p.y-b.p[1],p.z-b.p[2]);
+        motion=Math.max(motion,displacement);
+        // A short push may settle adjacent bars by a few millimetres.  Reject
+        // only a meaningful shift or lean, which is the onset of a fall.
+        if(displacement>.06||1-2*(q.x*q.x+q.z*q.z)<.82)stable=false;
       }
-      for(let n=0;n<120;n++){pulled.step();observe();}
-      pulled.free();
-      scores.push({index,stable,motion});
+    };
+    try{
+      moving.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
+      // Probe the selected bar with the same short fingertip push used live.
+      moving.collider(0).setCollisionGroups(0x00020001);moving.collider(0).setFriction(SLIDE_FRICTION);
+      const start=moving.translation(),yaw=bar.yaw;
+      const end={x:start.x+Math.cos(yaw)*side*PUSH_STROKE,y:start.y,z:start.z-Math.sin(yaw)*side*PUSH_STROKE};
+      for(let n=1;n<=60;n++){
+        const u=n/60;moving.setNextKinematicTranslation({x:start.x+(end.x-start.x)*u,y:start.y,z:start.z+(end.z-start.z)*u});
+        pulled.step();observe();yield;
+      }
+      for(let n=0;n<30;n++){pulled.step();observe();yield;}
+    }finally{pulled.free();}
+    return {index,stable,motion};
+  }
+  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box,rig,tilt)=>armClear(tool,yaw,box,rig,.01,tilt),armClearMany:(tool,yaw,boxes,rig,tilt)=>armClearMany(tool,yaw,boxes,rig,.01,tilt),probe,chooseRemoval(s,candidates,routes=[]){
+    const scores:{index:number;stable:boolean;motion:number}[]=[];
+    for(const index of candidates.slice(0,3)){
+      const run=probe(s,index,routes.find(route=>route.index===index)?.side??1);let step=run.next();
+      while(!step.done)step=run.next();
+      if(step.value)scores.push(step.value);
     }
     const rank=new Map(candidates.map((index,position)=>[index,position]));
     scores.sort((a,b)=>Number(b.stable)-Number(a.stable)||
@@ -68,6 +81,13 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         // Uniform, nearly full-size contact hulls keep each three-bar story level.
         const collider=RAPIER.ColliderDesc.cuboid(BAR_CONTACT.L/2,BAR_CONTACT.H/2,BAR_CONTACT.W/2);
         world.createCollider(collider.setDensity(GOLD_DENSITY).setFriction(BAR_FRICTION).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min).setRestitution(BAR_RESTITUTION),body);bodies.set(i,body);
+      }
+      // Damping only steadies the standing stack; a loose metal bar falls and tumbles freely.
+      const damping=b.inTower?TOWER_DAMPING:FREE_DAMPING;
+      if(body.linearDamping()!==damping.linear){body.setLinearDamping(damping.linear);body.setAngularDamping(damping.angular);}
+      const kick=s.releaseKick;
+      if(kick?.index===i&&body.bodyType()===RAPIER.RigidBodyType.Dynamic){
+        body.setLinvel({x:kick.v[0],y:kick.v[1],z:kick.v[2]},true);body.setAngvel({x:kick.w[0],y:kick.w[1],z:kick.w[2]},true);delete s.releaseKick;
       }
       if(s.active===i&&s.carry){
         if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
