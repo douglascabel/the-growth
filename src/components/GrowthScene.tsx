@@ -8,7 +8,7 @@ import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ContactShadows, Environment, Lightformer, OrbitControls, useTexture } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { GRIPPER_SCALE, GRIPPER_TOOL_OFFSET, RIG, TAB, ROBOT_BASE, ROBOT_MODEL_YAW, ROBOT_SCALE, createSim, jawPose, rigProfileFromBones, solveIK, stepSim, type RigProfile, type Vec } from "@/lib/growth-sim";
+import { GRIPPER_SCALE, GRIPPER_TOOL_OFFSET, RIG, ROBOT_BASE, ROBOT_MODEL_YAW, ROBOT_SCALE, createSim, jawPose, rigProfileFromBones, solveIK, stepSim, type RigProfile, type Vec } from "@/lib/growth-sim";
 import { createDynamics } from "@/lib/growth-physics";
 import { lingotHullPoints, normalizeLingot } from "@/lib/lingot-geometry";
 import GalleryRoom from "./GalleryRoom";
@@ -52,7 +52,7 @@ type RobotJointName = typeof robotJointNames[number];
 type RobotRigData = {
   joints:Map<RobotJointName,THREE.Object3D>;
   restQuaternion:Map<RobotJointName,THREE.Quaternion>;
-  axes:{ yaw:THREE.Vector3; shoulder:THREE.Vector3; elbow:THREE.Vector3; wrist:THREE.Vector3; roll:THREE.Vector3; lever:THREE.Vector3 };
+  axes:{ yaw:THREE.Vector3; shoulder:THREE.Vector3; elbow:THREE.Vector3; forearm:THREE.Vector3; wrist:THREE.Vector3; roll:THREE.Vector3; lever:THREE.Vector3 };
 };
 const robotRigProfiles = new WeakMap<THREE.Group, RigProfile>();
 const robotRigData = new WeakMap<THREE.Group, RobotRigData>();
@@ -61,9 +61,12 @@ function prepareRobot(scene: THREE.Group) {
   const joints = new Map<RobotJointName, THREE.Object3D>();
   // GLTFLoader sanitizes node names ("Lever.O.001" -> "LeverO001", spaces -> "_").
   const bySanitizedName = new Map(robotJointNames.map(name => [THREE.PropertyBinding.sanitizeNodeName(name), name]));
+  // Authored direction arrows on the clamp and A6 levers (Material.009 / .010) are not hardware.
+  const arrows = new Set(["Clamp.lever", "A6-Lever"].map(name => THREE.PropertyBinding.sanitizeNodeName(name)));
   scene.traverse((object) => {
     const name = bySanitizedName.get(object.name);
     if (name && !joints.has(name)) joints.set(name, object);
+    if (arrows.has(object.name)) object.visible = false;
     if ((object as THREE.Mesh).isMesh) {
       const mesh = object as THREE.Mesh;
       mesh.castShadow = true;
@@ -103,6 +106,8 @@ function prepareRobot(scene: THREE.Group) {
       yaw:axisInJointFrame("A1",new THREE.Vector3(0,1,0)),
       shoulder:axisInJointFrame("A2",pitch),
       elbow:axisInJointFrame("A3",pitch),
+      // A4 rolls the wrist about the forearm, which points forward at rest like the flange.
+      forearm:axisInJointFrame("A4",forward),
       wrist:axisInJointFrame("A5",pitch),
       roll:axisInJointFrame("A6",toolAxis),
       lever,
@@ -240,7 +245,7 @@ function Robot({ sim, obj }: { sim: ReturnType<typeof createSim>; obj:THREE.Grou
   const rotation = useMemo(() => new THREE.Quaternion(), []);
   useFrame(() => {
     if (!rig) return;
-    const ik = solveIK(sim.tool, sim.toolYaw, sim.rig);
+    const ik = solveIK(sim.tool, sim.toolYaw, sim.rig, sim.toolTilt);
     const turn = (name:RobotJointName, axis:THREE.Vector3, angle:number) => {
       rotation.setFromAxisAngle(axis, angle);
       rig.joints.get(name)!.quaternion.copy(rig.restQuaternion.get(name)!).multiply(rotation);
@@ -248,6 +253,7 @@ function Robot({ sim, obj }: { sim: ReturnType<typeof createSim>; obj:THREE.Grou
     turn("A1", rig.axes.yaw, ik.yaw);
     turn("A2", rig.axes.shoulder, ik.shoulder);
     turn("A3", rig.axes.elbow, ik.elbow);
+    turn("A4", rig.axes.forearm, ik.forearm);
     turn("A5", rig.axes.wrist, ik.wrist);
     turn("A6", rig.axes.roll, ik.roll);
     // Parallel levers: both links swing together and the finger counter-rotates to stay square.
@@ -284,18 +290,6 @@ function Bars({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometry: 
   return (
     <instancedMesh ref={instances} args={[geometry, material, sim.bars.length]} castShadow receiveShadow frustumCulled={false} />
   );
-}
-
-const steel = new THREE.MeshStandardMaterial({ color: "#3a3d40", metalness: 0.8, roughness: 0.35 });
-/** The contact surface belongs to the closed hand; it is not separate visible tooling. */
-function PushTab({ sim }: { sim: ReturnType<typeof createSim> }) {
-  const ref = useRef<THREE.Mesh>(null);
-  useFrame(() => {
-    const m = ref.current; if (!m) return;
-    m.visible = false;
-    if (sim.push) { m.position.set(...sim.push.p); m.rotation.set(0, sim.push.yaw, 0); }
-  });
-  return <mesh ref={ref} material={steel} castShadow><boxGeometry args={[TAB.L, TAB.H, TAB.W]} /></mesh>;
 }
 
 function Stepper({ sim, geometry, robot }: { sim: ReturnType<typeof createSim>; geometry: THREE.BufferGeometry; robot:THREE.Group|null }) {
@@ -362,7 +356,6 @@ function World() {
       <Suspense fallback={null}>
         <Robot sim={sim} obj={obj} />
         <Bars sim={sim} geometry={lingotGeometry} />
-        <PushTab sim={sim} />
         <Stepper sim={sim} geometry={lingotGeometry} robot={obj} />
       </Suspense>
 

@@ -1,12 +1,11 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { BAR, BAR_CONTACT, BAR_FRICTION, PUSH_STROKE, SLIDE_FRICTION, TAB, type Dynamics } from './growth-sim';
+import { BAR, BAR_CONTACT, BAR_FRICTION, BAR_RESTITUTION, GOLD_DENSITY, PUSH_STROKE, SLIDE_FRICTION, type Dynamics } from './growth-sim';
 import { armClear, armClearMany, robotContacts } from './robot-kinematics';
 let ready:Promise<void>|undefined;
 export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
   ready??=RAPIER.init();await ready;
   let world:RAPIER.World;
   let bodies=new Map<number,RAPIER.RigidBody>();
-  let pusher:RAPIER.RigidBody|undefined;
   let quietTime=0;
   let robot:RAPIER.RigidBody[]=[];
   const reset=()=>{
@@ -15,10 +14,10 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
     world.integrationParameters.lengthUnit=.1;
     world.integrationParameters.normalizedAllowedLinearError=.0005;
     world.integrationParameters.normalizedPredictionDistance=.01;
-    bodies=new Map();pusher=undefined;quietTime=0;robot=[];
+    bodies=new Map();quietTime=0;robot=[];
     world.createCollider(RAPIER.ColliderDesc.cuboid(20,.1,20).setTranslation(0,-.1,0).setFriction(.62).setRestitution(.005));
   };reset();
-  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box,rig)=>armClear(tool,yaw,box,rig),armClearMany:(tool,yaw,boxes,rig)=>armClearMany(tool,yaw,boxes,rig),chooseRemoval(s,candidates,routes=[]){
+  return {reset,settled:()=>quietTime>1.5,armClear:(tool,yaw,box,rig,tilt)=>armClear(tool,yaw,box,rig,.01,tilt),armClearMany:(tool,yaw,boxes,rig,tilt)=>armClearMany(tool,yaw,boxes,rig,.01,tilt),chooseRemoval(s,candidates,routes=[]){
     const snapshot=world.takeSnapshot();
     const scores:{index:number;stable:boolean;motion:number}[]=[];
     // Probe the actual contact network without moving the visible world or pinning supports.
@@ -68,7 +67,7 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...b.p).setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)}).setLinearDamping(.85).setAngularDamping(1.2).setCcdEnabled(true));
         // Uniform, nearly full-size contact hulls keep each three-bar story level.
         const collider=RAPIER.ColliderDesc.cuboid(BAR_CONTACT.L/2,BAR_CONTACT.H/2,BAR_CONTACT.W/2);
-        world.createCollider(collider.setDensity(19300).setFriction(BAR_FRICTION).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min).setRestitution(.005),body);bodies.set(i,body);
+        world.createCollider(collider.setDensity(GOLD_DENSITY).setFriction(BAR_FRICTION).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min).setRestitution(BAR_RESTITUTION),body);bodies.set(i,body);
       }
       if(s.active===i&&s.carry){
         if(body.bodyType()!==RAPIER.RigidBodyType.KinematicPositionBased)body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased,true);
@@ -77,45 +76,34 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         body.setTranslation({x:b.p[0],y:b.p[1],z:b.p[2]},true);body.setRotation(b.q??{x:0,y:Math.sin(b.yaw/2),z:0,w:Math.cos(b.yaw/2)},true);
         body.setLinvel({x:0,y:0,z:0},true);body.setAngvel({x:0,y:0,z:0},true);
       }
-      // Keep established placement contacts during construction. In deconstruction,
-      // isolate the selected bar so only its own hand and the tower can touch it.
-      const selected=s.active===i;
-      // Before grip closure only the small test tab can touch the selected bar.
-      // Once closed, the carried bar stays physical against the tower but ignores
-      // the robot colliders because its kinematic pose is the closed picker hold.
-      // A released bar in construction also meets the push tab that sets it home.
-      const groups=!selected?0x00010007:s.carry?0x00020001:s.phase!=='remove'?0x00020005:
-        b.inTower?0x00020005:0x00020004;
+      // The bar the hand works on: a pulled bar that has been let go falls like any other.
+      const selected=s.active===i&&!(s.phase==='remove'&&s.released);
+      // Carried, it is a kinematic hold that meets bars but not its own fingers; otherwise
+      // it also meets the pushing fingertip.
+      const groups=!selected?0x00010007:s.carry?0x00020001:0x00020005;
       body.collider(0).setCollisionGroups(groups);
       // The selected bar slides alone while pushed home, and through a careful extraction
-      // until it is set on top; at rest it grips like every other bar.
-      const sliding=selected&&(!!s.push||s.carry||s.phase==='remove'&&!s.released);
+      // until it is let go; at rest it grips like every other bar.
+      const sliding=selected&&(s.pushing||s.carry||s.phase==='remove'&&!s.released);
       body.collider(0).setFriction(sliding?SLIDE_FRICTION:BAR_FRICTION);
     }
-    const contacts=robotContacts(s.tool,s.toolYaw,s.jaw,s.rig);
+    const contacts=robotContacts(s.tool,s.toolYaw,s.jaw,s.rig,s.toolTilt);
     if(!robot.length){
       for(const contact of contacts){
         const body=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...contact.p).setRotation(contact.q));
-        // Only fingertips and the push tab touch tower bars. Links guide the tool
-        // pose and must not brace against or knock neighboring supports.
         const groups=contact.name.startsWith('finger-')?0x00040001:0x00040000;
         world.createCollider(RAPIER.ColliderDesc.capsule(contact.halfHeight,contact.radius).setFriction(.35).setCollisionGroups(groups),body);
         robot.push(body);
       }
     }
-    // Deconstruction touches the tower only through the tab and the held bar. In
-    // construction the arm and fingers meet loose bars, except while the tab pushes.
-    const robotTouches=s.phase!=='remove'&&!s.push;
-    robot.forEach(body=>body.collider(0).setCollisionGroups(robotTouches?0x00040001:0x00040000));
+    // While pushing, the fingers touch only the pushed bar. Deconstruction otherwise reaches the
+    // tower only through the held bar; in construction the arm and fingers meet loose bars.
+    robot.forEach((body,index)=>body.collider(0).setCollisionGroups(
+      s.pushing?(index>=4?0x00040002:0x00040000):s.phase==='remove'?0x00040000:0x00040001));
     const robotStarts=robot.map(body=>({p:body.translation(),q:body.rotation()}));
-    // Pushes transfer force through contact; the target remains fully dynamic.
-    if(s.push){
-      if(!pusher){pusher=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(...s.push.p).setRotation({x:0,y:Math.sin(s.push.yaw/2),z:0,w:Math.cos(s.push.yaw/2)}));world.createCollider(RAPIER.ColliderDesc.cuboid(TAB.L/2,TAB.H/2,TAB.W/2).setFriction(.62).setCollisionGroups(0x00040002),pusher);}
-    }else if(pusher){world.removeRigidBody(pusher);pusher=undefined;}
     // Fixed substeps keep stacking and contact independent of render frame rate.
     const steps=Math.max(1,Math.ceil(dt/(1/120)));world.timestep=dt/steps;
     const held=bodies.get(s.active),bar=s.bars[s.active],start=held?.translation(),startQ=held?.rotation();
-    const pushStart=pusher?.translation();
     for(let i=0;i<steps;i++){
       const u=(i+1)/steps;
       robot.forEach((body,j)=>{
@@ -130,7 +118,6 @@ export async function createDynamics(hull?:Float32Array):Promise<Dynamics> {
         const q=bar.q??{x:0,y:Math.sin(bar.yaw/2),z:0,w:Math.cos(bar.yaw/2)};
         held.setNextKinematicRotation({x:startQ.x+(q.x-startQ.x)*u,y:startQ.y+(q.y-startQ.y)*u,z:startQ.z+(q.z-startQ.z)*u,w:startQ.w+(q.w-startQ.w)*u});
       }
-      if(pusher&&s.push&&pushStart)pusher.setNextKinematicTranslation({x:pushStart.x+(s.push.p[0]-pushStart.x)*u,y:pushStart.y+(s.push.p[1]-pushStart.y)*u,z:pushStart.z+(s.push.p[2]-pushStart.z)*u});
       world.step();
     }
     let fallen=false,quiet=true;
