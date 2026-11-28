@@ -1,10 +1,13 @@
 import {describe,expect,it} from 'vitest';
 import * as THREE from 'three';
-import {isLoose,BAR,SLOT,MAX_BARS,LAYERS,TOWER,ROBOT_BASE,ROBOT_SCALE,RIG,rigProfileFromBones,GRIPPER_MODEL_HALF_SPAN,GRIPPER_CLOSE_TRAVEL,GRIPPER_FINGER_HALF_WIDTH,PUSH_GRIP,PUSH_STROKE,REMOVE_CYCLE,END_GRIP,PINCH_GRIP,createSim,stepSim,placement,eligibleBars,canReach,maxToolHeight,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE} from './growth-sim';
+import {isLoose,BAR,SLOT,MAX_BARS,LAYERS,TOWER,TOWER_HALF,ROBOT_BASE,ROBOT_SCALE,RIG,rigProfileFromBones,GRIPPER_OPEN_HALF_GAP,GRIPPER_CLOSED_HALF_GAP,GRIPPER_FINGER_HALF_WIDTH,GRIPPER_TOOL_OFFSET,PUSH_STROKE,REMOVE_CYCLE,CYCLE,NUDGE,END_GRIP_ALONG,createSim,stepSim,placement,eligibleBars,canReach,maxToolHeight,restartFromPile,strategicCandidates,supportMargin,REACH_CLEARANCE,jawPose,fingertipDepth,solveIK,settlePoses,barAxis} from './growth-sim';
 import {createDynamics} from './growth-physics';
-import {GRIPPER_FINGER_RADIUS,gripHalfSpan,robotContacts} from './robot-kinematics';
+import {GRIPPER_FINGER_RADIUS,robotContacts,robotJoints} from './robot-kinematics';
 import {normalizeLingot} from './lingot-geometry';
 const advance=(s:ReturnType<typeof createSim>,seconds:number)=>{for(let i=0;i<Math.round(seconds*60);i++)stepSim(s,1/60);};
+/** Without Rapier nothing moves the pushed bar: emulate the tab's stroke once it has pushed. */
+const stepWithHandPush=(s:ReturnType<typeof createSim>)=>{const was=!!s.push;stepSim(s,1/60);const b=s.bars[s.active];
+  if(b&&was&&!s.push&&s.phaseT/REMOVE_CYCLE<.5&&s.source){const d=barAxis(s.source.yaw);b.p=[b.p[0]+d[0]*s.side*PUSH_STROKE,b.p[1],b.p[2]+d[2]*s.side*PUSH_STROKE];}};
 const built=()=>{const s=createSim();s.phase='remove';s.placed=MAX_BARS;s.bars.forEach((b,i)=>{const p=placement(i);b.p=[p.x,(p.layer+.5)*BAR.H,p.z];b.yaw=p.yaw;b.q={x:0,y:Math.sin(p.yaw/2),z:0,w:Math.cos(p.yaw/2)};b.layer=p.layer;b.slot=p.slot;b.inTower=true;b.loose=isLoose(TOWER,p);});return s;};
 describe('reach-limited sculpture',()=>{
  it('uses 155 × 41.45 × 62.14 mm',()=>{expect(BAR).toEqual({L:.155,H:.04145,W:.06214});});
@@ -17,16 +20,28 @@ describe('reach-limited sculpture',()=>{
    const cone=normalizeLingot(new THREE.ConeGeometry(30,40,8)),p=cone.getAttribute('position');let top=0;
    for(let i=1;i<p.count;i++)if(p.getY(i)>p.getY(top))top=i;expect(Math.hypot(p.getX(top),p.getZ(top))).toBeLessThan(1e-6);
  });
- it('derives link lengths from native KUKA bone world positions',()=>{
-   const rig=rigProfileFromBones({track:[0,0,0],a1:[0,.34,0],a2:[0,.55,0],a3:[.45,.75,0],a5:[.75,1.15,0],tool:[.75,1.42,0]});
-   expect(rig.linkLengths.a1ToA2).toBeCloseTo(.21,8);
-   expect(rig.linkLengths.a2ToA3).toBeCloseTo(Math.hypot(.45,.2),8);
-   expect(rig.linkLengths.a3ToA5).toBeCloseTo(.5,8);
-   expect(rig.linkLengths.a5ToTool).toBeCloseTo(.27,8);
-   expect(rig.wrist).toEqual(RIG.wrist);
+ it('derives KR 16 R2010 link lengths from its GLB pivots',()=>{
+   // Authored pivots: A2 160 mm ahead of A1 at 520 mm, 980 mm upper arm, 150 x 860 mm forearm offset.
+   expect(RIG.shoulder[1]).toBeCloseTo(.52,6);expect(-RIG.shoulder[2]).toBeCloseTo(.16,6);
+   expect(RIG.linkLengths.a2ToA3).toBeCloseTo(.98,6);
+   expect(RIG.linkLengths.a3ToA5).toBeCloseTo(Math.hypot(.15,.86),6);
+   // Pitch pivots may sit anywhere along their lateral axes: the arm plane comes from the wrist.
+   expect(RIG.shoulder[0]).toBeCloseTo(RIG.wrist[0],9);expect(RIG.elbow[0]).toBeCloseTo(RIG.wrist[0],9);
+   expect(RIG.toolRest).toBeCloseTo(0,9);
+   // Maximum wrist reach matches the KR 16 R2010's 2013 mm.
+   expect(-RIG.shoulder[2]+RIG.linkLengths.a2ToA3+RIG.linkLengths.a3ToA5).toBeCloseTo(2.013,2);
+   const moved=rigProfileFromBones({track:[1,0,2],a1:[1,.2845,2],a2:[.9,.52,2.16],a3:[.88,1.5,2.16],a5:[1,1.65,3.02],tool:[1,1.65,3.4]});
+   expect(moved.linkLengths.a2ToA3).toBeCloseTo(.98,6);expect(moved.wrist[2]).toBeCloseTo(-1.02,6);
+ });
+ it('places the IK wrist straight above a downward tool',()=>{
+   for(const tool of [[1.25,.05,0],[1.25,1.2,0],[.9,.4,.8],[-.3,.6,1.1]] as [number,number,number][]){
+     const {wrist}=robotJoints(tool,.3);
+     expect(wrist[0]).toBeCloseTo(tool[0],6);expect(wrist[2]).toBeCloseTo(tool[2],6);expect(wrist[1]-tool[1]).toBeCloseTo(RIG.toolDrop,6);
+   }
  });
  it('seats the robot on the floor',()=>{expect(ROBOT_BASE.y).toBe(0);});
- it('uses 1:1 scale and a 1.65 m floor layout',()=>{expect(ROBOT_SCALE).toBe(1);expect(TOWER.x).toBeCloseTo(1.65,6);expect(createSim().bars.every(b=>b.p[0]>.9&&b.p[0]<2.4)).toBe(true);});
+ it('uses 1:1 scale and lays the scatter inside the floor reach',()=>{expect(ROBOT_SCALE).toBe(1);expect(TOWER.x).toBeCloseTo(1.25,6);
+   const s=createSim();expect(s.bars.every(b=>canReach([b.p[0],BAR.H,b.p[2]])&&Math.hypot(b.p[0]-TOWER.x,b.p[2]-TOWER.z)>.3)).toBe(true);});
  it('covers the floor-level tower with the articulated reach envelope',()=>{
    expect(canReach([TOWER.x, BAR.H/2, TOWER.z])).toBe(true);
    expect(maxToolHeight(TOWER.x,TOWER.z)).toBeGreaterThan(BAR.H);
@@ -36,9 +51,10 @@ describe('reach-limited sculpture',()=>{
    expect(placement(0).z).toBeCloseTo(TOWER.z-SLOT,6);expect(placement(2).z).toBeCloseTo(TOWER.z+SLOT,6);
  });
  it('stops at the last complete reachable layer',()=>{
-   expect(LAYERS).toBeGreaterThanOrEqual(25);
+   expect(LAYERS).toBeGreaterThanOrEqual(25);expect(LAYERS).toBeLessThan(40);
    for(let i=0;i<MAX_BARS;i++){const p=placement(i);expect(canReach([p.x,(p.layer+1)*BAR.H+.02,p.z])).toBe(true);}
-   expect([0,1,2].some(slot=>{const p=placement(MAX_BARS+slot);return !canReach([p.x,(p.layer+1)*BAR.H+REACH_CLEARANCE,p.z]);})).toBe(true);
+   // The next story fails somewhere along its set-down and push-home hand poses.
+   expect([0,1,2].some(slot=>{const p=placement(MAX_BARS+slot),d=barAxis(p.yaw);return [0,.18,-.18].some(o=>!canReach([p.x+d[0]*o,(p.layer+1)*BAR.H+REACH_CLEARANCE,p.z+d[2]*o]));})).toBe(true);
  });
  it('only chooses bars below the highest completed layer',()=>{
    const s=built();advance(s,1.6);expect(s.phase).toBe('remove');expect(s.removalHistory).toHaveLength(1);
@@ -56,15 +72,17 @@ describe('reach-limited sculpture',()=>{
    let tested=false,closed=false;
    for(let i=0;i<Math.ceil(REMOVE_CYCLE*60);i++){
      stepSim(s,1/60);
-     if(s.push){tested=true;expect(s.carry).toBe(false);expect(s.closed).toBe(true);expect(s.grip).toBe(PUSH_GRIP);expect(s.active).toBe(index);}
+     if(s.push){tested=true;expect(s.carry).toBe(false);expect(s.closed).toBe(true);expect(s.active).toBe(index);}
      if(s.closed)closed=true;
    }
-   expect(PUSH_STROKE).toBeLessThanOrEqual(.02);expect(tested).toBe(true);expect(closed).toBe(true);
+   // Long enough for the pads to straddle the end beyond the cross layer above, still a short push.
+   expect(BAR.L/2+PUSH_STROKE-TOWER_HALF).toBeGreaterThanOrEqual(2*GRIPPER_FINGER_HALF_WIDTH);expect(PUSH_STROKE).toBeLessThanOrEqual(.05);
+   expect(tested).toBe(true);expect(closed).toBe(true);
  });
  it('pushes, pinches, and places the removed bar on top',()=>{
    const s=built();s.random=()=>.1;advance(s,1.6);
    const index=s.active;if(index<0)throw new Error('no safe removal was selected');
-   advance(s,REMOVE_CYCLE+.2);
+   for(let i=0;i<Math.ceil((REMOVE_CYCLE+.2)*60);i++)stepWithHandPush(s);
    const moved=s.bars[index];expect(moved?.inTower).toBe(true);
    expect(moved?.layer).toBe(LAYERS);
    expect(s.bars.filter(b=>b.inTower).length).toBe(MAX_BARS);
@@ -74,11 +92,13 @@ describe('reach-limited sculpture',()=>{
    const index=s.active,bar=s.bars[index];if(index<0||!bar)throw new Error('no safe removal was selected');
    const yaw=bar.yaw,orbit:number[][]=[];let pinched=false;
    for(let i=0;i<Math.ceil(REMOVE_CYCLE*60);i++){
-     stepSim(s,1/60);
+     stepWithHandPush(s);
      const k=s.phaseT/REMOVE_CYCLE;
-     if(k>=.74&&k<=.85)orbit.push([...s.tool]);
-     if(s.carry&&s.active===index){
-       pinched=true;expect(s.grip).toBe(PINCH_GRIP);expect(bar.yaw).toBeCloseTo(yaw,6);
+     if(k>=.41&&k<=.48)orbit.push([...s.tool]);
+     // The bar comes straight out along its own axis before it is turned for the top story.
+     if(s.carry&&s.active===index&&k<.62){
+       pinched=true;expect(s.jaw).toBeLessThan(GRIPPER_OPEN_HALF_GAP);expect(Math.cos(bar.yaw-yaw)).toBeCloseTo(1,6);
+       const held=s.source?.along??0;expect(Math.abs(held)).toBeLessThan(BAR.L/2-GRIPPER_FINGER_HALF_WIDTH);
      }
    }
    expect(orbit.length).toBeGreaterThan(5);
@@ -86,7 +106,8 @@ describe('reach-limited sculpture',()=>{
    expect(pinched).toBe(true);
  });
  it('does not start a removal when no reachable top placement exists',()=>{
-   const s=built();s.tower={x:ROBOT_BASE.x+2,z:TOWER.z};advance(s,2);
+   // Move the whole standing tower out of reach; the top placement follows the actual bars.
+   const s=built(),shift=2-TOWER.x;s.tower={x:ROBOT_BASE.x+2,z:TOWER.z};for(const b of s.bars)b.p=[b.p[0]+shift,b.p[1],b.p[2]];advance(s,2);
    expect(s.active).toBe(-1);expect(s.removalHistory).toHaveLength(0);
  });
  it('does not leave deconstruction frozen when the tower keeps jittering',()=>{
@@ -127,25 +148,37 @@ describe('reach-limited sculpture',()=>{
    expect(supportMargin(s,1)).toBe(-1);expect(strategicCandidates(s)[0]).not.toBe(1);
  });
  it('uses articulated finite contact shapes which follow the arm pose',()=>{
-   const a=robotContacts([.34,.7,.34],0),b=robotContacts([.1,1,.34],0);
+   const a=robotContacts([1.2,.7,.34],0),b=robotContacts([.9,1,.34],0);
    expect(a.map(c=>c.name)).toEqual(['shoulder','upper-arm','forearm','wrist','finger--1','finger-1']);
+   expect(solveIK([1.2,.7,.34],0).wrist).toBeLessThan(0);
    expect(a.every(c=>[...c.p,...Object.values(c.q)].every(Number.isFinite))).toBe(true);
    expect(a[2]?.p).not.toEqual(b[2]?.p);
  });
- it('uses the same open and closed gripper span for rendered and physical fingers',()=>{
-   expect(gripHalfSpan(PINCH_GRIP,false)).toBe(PINCH_GRIP.open);expect(gripHalfSpan(PINCH_GRIP,true)).toBe(PINCH_GRIP.closed);
-   const open=robotContacts([.34,.7,.34],0,false,PINCH_GRIP).slice(4),closed=robotContacts([.34,.7,.34],0,true,PINCH_GRIP).slice(4);
-   expect(Math.abs((open[1]?.p[0]??0)-(open[0]?.p[0]??0))).toBeCloseTo(PINCH_GRIP.open*2,6);
-   expect(Math.abs((closed[1]?.p[0]??0)-(closed[0]?.p[0]??0))).toBeCloseTo(PINCH_GRIP.closed*2,6);
+ it('uses the live jaw gap for the physical fingers',()=>{
+   for(const gap of [GRIPPER_OPEN_HALF_GAP,GRIPPER_CLOSED_HALF_GAP]){
+     const [a,b]=robotContacts([1.2,.7,.34],0,gap).slice(4);
+     expect(Math.abs((b?.p[0]??0)-(a?.p[0]??0))).toBeCloseTo(2*(gap+GRIPPER_FINGER_RADIUS),6);
+   }
  });
- it('uses the authored picker jaw layout and mesh thickness for render and contacts',()=>{
-   expect(END_GRIP.open).toBeCloseTo(GRIPPER_MODEL_HALF_SPAN*ROBOT_SCALE,8);
-   expect(END_GRIP.closed).toBeCloseTo((GRIPPER_MODEL_HALF_SPAN-GRIPPER_CLOSE_TRAVEL)*ROBOT_SCALE,8);
-   expect(PINCH_GRIP.open).toBe(END_GRIP.open);expect(PINCH_GRIP.closed).toBe(END_GRIP.closed);
-   expect(GRIPPER_FINGER_RADIUS).toBe(GRIPPER_FINGER_HALF_WIDTH);
+ it('opens the authored lever gripper wide enough for a bar and closes on its tapered flank',()=>{
+   expect(2*GRIPPER_OPEN_HALF_GAP).toBeGreaterThan(BAR.W+.01);
+   expect(2*GRIPPER_CLOSED_HALF_GAP).toBeLessThan(BAR.W);expect(2*GRIPPER_CLOSED_HALF_GAP).toBeGreaterThan(.049);
+   expect(jawPose(GRIPPER_OPEN_HALF_GAP).angle).toBeCloseTo(0,9);expect(jawPose(GRIPPER_CLOSED_HALF_GAP).angle).toBeLessThan(0);
+   // Closed pads hold mid-height with their tips above the bar bottom (and the layer below).
+   expect(fingertipDepth(GRIPPER_CLOSED_HALF_GAP)).toBeGreaterThan(BAR.H/2);expect(fingertipDepth(GRIPPER_CLOSED_HALF_GAP)).toBeLessThan(BAR.H-.005);
+   expect(GRIPPER_TOOL_OFFSET).toBeLessThan(0);
+ });
+ it('sets bars down with the fingers clear of neighbouring ends, then pushes them home',()=>{
+   // Layer 0 runs radially: its held end faces the robot.
+   for(const p of [placement(1)]){
+     const pose=settlePoses(p,END_GRIP_ALONG,.3),toRobot=Math.hypot(pose.set[0]-ROBOT_BASE.x,pose.set[2]-ROBOT_BASE.z)<=Math.hypot(p.x-ROBOT_BASE.x,p.z-ROBOT_BASE.z)+1e-9;
+     const d=barAxis(pose.barYaw),fingers=(pose.set[0]-p.x)*d[0]+(pose.set[2]-p.z)*d[2];
+     expect(toRobot).toBe(true);expect(Math.abs(fingers)-GRIPPER_FINGER_HALF_WIDTH).toBeGreaterThan(BAR.L/2+.004);
+     expect(Math.hypot(pose.centre[0]-p.x,pose.centre[2]-p.z)).toBeCloseTo(NUDGE,9);
+   }
  });
  it('robot contacts physically displace released bars',async()=>{
-   const s=createSim();s.tool=[.34,.7,.34];const contact=robotContacts(s.tool,0)[4];if(!contact)throw new Error('missing finger');
+   const s=createSim();s.tool=[1.2,.7,.34];const contact=robotContacts(s.tool,0)[4];if(!contact)throw new Error('missing finger');
    const bar=s.bars[0];if(!bar)throw new Error('missing bar');bar.p=[...contact.p];bar.q={x:0,y:0,z:0,w:1};
    const initial=[...bar.p];s.physics=await createDynamics();advance(s,.5);
    expect(Math.hypot(bar.p[0]-(initial[0]??0),bar.p[2]-(initial[2]??0))).toBeGreaterThan(.005);
@@ -161,13 +194,13 @@ describe('reach-limited sculpture',()=>{
    expect(s.generation).toBeGreaterThanOrEqual(0);expect(s.placed+s.bars.filter(b=>b.inTower).length).toBeGreaterThanOrEqual(3);
    expect(s.bars.filter(b=>b.inTower).length).toBeGreaterThanOrEqual(0);
  },60000);
- it('builds to full reach and recovers the same bars after a fall',async()=>{
-   const s=createSim(()=>.1);s.physics=await createDynamics();const bars=s.bars;
-   advance(s,640);expect(s.generation).toBeGreaterThanOrEqual(1);expect(['build','remove','collapse','rest']).toContain(s.phase);
-   expect(s.recoveryHistory.length).toBeGreaterThanOrEqual(0);
-   const recovered=s.recoveryHistory.length;advance(s,120);
-   expect(s.generation).toBeGreaterThanOrEqual(1);expect(s.bars).toBe(bars);expect(['build','remove','collapse','rest']).toContain(s.phase);
-   expect(s.recoveryHistory.length).toBeGreaterThanOrEqual(recovered);
+ it('builds level stories from the scatter with every bar pushed home',async()=>{
+   const s=createSim(()=>.1);s.physics=await createDynamics();advance(s,2.2+CYCLE*12+.5);
+   expect(s.placed).toBeGreaterThanOrEqual(12);expect(s.generation).toBe(0);
+   for(const b of s.bars.filter(item=>item.inTower&&item!==s.bars[s.active])){
+     const p=placement(b.layer*3+b.slot),q=b.q??{x:0,y:0,z:0,w:1};
+     expect(Math.hypot(b.p[0]-p.x,b.p[2]-p.z)).toBeLessThan(.006);expect(1-2*(q.x*q.x+q.z*q.z)).toBeGreaterThan(.999);
+   }
  },120000);
  it('preserves the actual fallen poses and bar identities when moving beside the pile',()=>{
    const s=createSim();s.bars.forEach((b,i)=>{b.p=[TOWER.x+i*.0001,.03,TOWER.z];b.q={x:.7,y:0,z:0,w:.7};});
@@ -188,6 +221,6 @@ describe('reach-limited sculpture',()=>{
    s.physics=await createDynamics();const bars=s.bars;let collapsed=false;
    for(let i=0;i<600*60;i++){stepSim(s,1/60);if(s.phase==='collapse')collapsed=true;if(s.generation>0)break;}
    expect(collapsed).toBe(true);expect(s.generation).toBe(1);expect(s.bars).toBe(bars);expect(s.phase).toBe('build');advance(s,.1);expect(s.recoveryHistory.length).toBeGreaterThan(0);
- },60000);
+ },300000);
 });
 

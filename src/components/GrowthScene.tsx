@@ -8,7 +8,7 @@ import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ContactShadows, Environment, Lightformer, OrbitControls, useTexture } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { GRIPPER_CLOSE_TRAVEL, RIG, TAB, ROBOT_BASE, ROBOT_SCALE, createSim, rigProfileFromBones, solveIK, stepSim, type RigProfile, type Vec } from "@/lib/growth-sim";
+import { GRIPPER_SCALE, GRIPPER_TOOL_OFFSET, RIG, TAB, ROBOT_BASE, ROBOT_MODEL_YAW, ROBOT_SCALE, createSim, jawPose, rigProfileFromBones, solveIK, stepSim, type RigProfile, type Vec } from "@/lib/growth-sim";
 import { createDynamics } from "@/lib/growth-physics";
 import { lingotHullPoints, normalizeLingot } from "@/lib/lingot-geometry";
 import GalleryRoom from "./GalleryRoom";
@@ -36,7 +36,7 @@ function useConcreteTexture() {
 }
 
 const modelBase = `${import.meta.env.BASE_URL}models/`;
-const robotGlbUrl = `${modelBase}kuka-kr210.glb?v=2`;
+const robotGlbUrl = `${modelBase}kuka-kr16-r2010.glb`;
 const goldBarGlbUrl = `${modelBase}gold-bar.glb`;
 const goldTextureUrls = [
   `${modelBase}gold-bar/material/color.jpg`,
@@ -44,81 +44,68 @@ const goldTextureUrls = [
   `${modelBase}gold-bar/material/roughness.jpg`,
   `${modelBase}gold-bar/material/metalness.jpg`,
 ] as string[];
-const robotJointNames = ["Track", "Base", "A1", "A2", "A3", "A4", "A5", "A6", "Tool", "JawL", "JawR"] as const;
+/** KR 16 R2010 pivots plus the lever gripper's moving parts, by their authored node names. */
+const robotJointNames = ["A1", "A2", "A3", "A4", "A5", "A6", "robot contact surface",
+  "Lever.O.001", "Lever.O.002", "Lever.u.001", "Lever.u.002", "Finger-oben", "Finger-unten",
+  "Fingertip.o", "Fingertip.u"] as const;
 type RobotJointName = typeof robotJointNames[number];
 type RobotRigData = {
   joints:Map<RobotJointName,THREE.Object3D>;
   restQuaternion:Map<RobotJointName,THREE.Quaternion>;
-  restPosition:Map<RobotJointName,THREE.Vector3>;
-  axes:{
-    yaw:THREE.Vector3; shoulder:THREE.Vector3; elbow:THREE.Vector3; wrist:THREE.Vector3; roll:THREE.Vector3;
-    jawL:THREE.Vector3; jawR:THREE.Vector3;
-  };
+  axes:{ yaw:THREE.Vector3; shoulder:THREE.Vector3; elbow:THREE.Vector3; wrist:THREE.Vector3; roll:THREE.Vector3; lever:THREE.Vector3 };
 };
 const robotRigProfiles = new WeakMap<THREE.Group, RigProfile>();
 const robotRigData = new WeakMap<THREE.Group, RobotRigData>();
 
 function prepareRobot(scene: THREE.Group) {
-  scene.updateMatrixWorld(true);
   const joints = new Map<RobotJointName, THREE.Object3D>();
+  // GLTFLoader sanitizes node names ("Lever.O.001" -> "LeverO001", spaces -> "_").
+  const bySanitizedName = new Map(robotJointNames.map(name => [THREE.PropertyBinding.sanitizeNodeName(name), name]));
   scene.traverse((object) => {
-    if (robotJointNames.includes(object.name as RobotJointName)) {
-      joints.set(object.name as RobotJointName, object);
-    }
+    const name = bySanitizedName.get(object.name);
+    if (name && !joints.has(name)) joints.set(name, object);
     if ((object as THREE.Mesh).isMesh) {
       const mesh = object as THREE.Mesh;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-      const source = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-      if (source instanceof THREE.MeshStandardMaterial) {
-        const material = source.clone();
-        const grip = /Grabber|Jaw/i.test(mesh.name);
-        material.color.set(grip ? "#202326" : "#f26a21");
-        material.metalness = grip ? 0.82 : 0.18;
-        material.roughness = grip ? 0.32 : 0.38;
-        mesh.material = material;
-      }
     }
   });
   for (const name of robotJointNames) {
-    if (!joints.has(name)) throw new Error(`Missing ${name} joint in ${robotGlbUrl}`);
+    if (!joints.has(name)) throw new Error(`Missing ${name} node in ${robotGlbUrl}`);
   }
   const joint = (name:RobotJointName) => joints.get(name)!;
+  // The authored hand opens 50 mm; scale it so the open pads clear a 62 mm bar.
+  joint("robot contact surface").scale.multiplyScalar(GRIPPER_SCALE);
+  scene.updateMatrixWorld(true);
   const worldPosition = (name:RobotJointName) => joint(name).getWorldPosition(new THREE.Vector3());
   const tuple = (v:THREE.Vector3):Vec => [v.x,v.y,v.z];
-  const rigPoints = {
-    track:tuple(worldPosition("Track")),
-    a1:tuple(worldPosition("A1")),
-    a2:tuple(worldPosition("A2")),
-    a3:tuple(worldPosition("A3")),
-    a5:tuple(worldPosition("A5")),
-    tool:tuple(worldPosition("Tool")),
-  };
-  robotRigProfiles.set(scene,rigProfileFromBones(rigPoints));
+  const pads = new THREE.Box3().setFromObject(joint("Fingertip.o")).getCenter(new THREE.Vector3())
+    .add(new THREE.Box3().setFromObject(joint("Fingertip.u")).getCenter(new THREE.Vector3())).multiplyScalar(.5);
+  const a5 = worldPosition("A5");
+  const toolAxis = pads.clone().sub(a5).normalize();
+  const tool = pads.clone().addScaledVector(toolAxis, GRIPPER_TOOL_OFFSET);
+  robotRigProfiles.set(scene,rigProfileFromBones({
+    track:tuple(scene.getWorldPosition(new THREE.Vector3())),
+    a1:tuple(worldPosition("A1")), a2:tuple(worldPosition("A2")), a3:tuple(worldPosition("A3")),
+    a5:tuple(a5), tool:tuple(tool),
+  }));
   const axisInJointFrame = (name:RobotJointName,axis:THREE.Vector3) =>
     axis.clone().applyQuaternion(joint(name).getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
-  const meshCenter = (name:string) => {
-    const mesh = scene.getObjectByName(name) as THREE.Mesh | undefined;
-    if (!mesh?.isMesh) throw new Error(`Missing ${name} mesh in ${robotGlbUrl}`);
-    mesh.geometry.computeBoundingBox();
-    return mesh.geometry.boundingBox!.getCenter(new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
-  };
-  const jawAxis = meshCenter("KUKA_JawR").sub(meshCenter("KUKA_JawL")).normalize();
-  const toParent = (name:RobotJointName,axis:THREE.Vector3) =>
-    axis.clone().applyQuaternion(joint(name).parent?.getWorldQuaternion(new THREE.Quaternion()).invert() ?? new THREE.Quaternion()).normalize();
+  // Pitch axes: forward x up, so a positive rotation raises a link, as the solver assumes.
+  const forward = new THREE.Vector3(a5.x, 0, a5.z).sub(new THREE.Vector3(worldPosition("A1").x, 0, worldPosition("A1").z)).normalize();
+  const pitch = forward.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
+  // Levers swing about the gripper frame's Z; their parent frame is that gripper frame.
+  const lever = new THREE.Vector3(0, 0, 1);
   robotRigData.set(scene,{
     joints,
     restQuaternion:new Map(robotJointNames.map(name=>[name,joint(name).quaternion.clone()])),
-    restPosition:new Map(robotJointNames.map(name=>[name,joint(name).position.clone()])),
     axes:{
       yaw:axisInJointFrame("A1",new THREE.Vector3(0,1,0)),
-      shoulder:axisInJointFrame("A2",new THREE.Vector3(0,0,1)),
-      elbow:axisInJointFrame("A3",new THREE.Vector3(0,0,1)),
-      wrist:axisInJointFrame("A5",new THREE.Vector3(0,0,1)),
-      roll:axisInJointFrame("A6",worldPosition("Tool").sub(worldPosition("A5")).normalize()),
-      jawL:toParent("JawL",jawAxis),
-      jawR:toParent("JawR",jawAxis),
+      shoulder:axisInJointFrame("A2",pitch),
+      elbow:axisInJointFrame("A3",pitch),
+      wrist:axisInJointFrame("A5",pitch),
+      roll:axisInJointFrame("A6",toolAxis),
+      lever,
     },
   });
   return scene;
@@ -248,40 +235,31 @@ function Robot({ sim, obj }: { sim: ReturnType<typeof createSim>; obj:THREE.Grou
     if (!obj) return null;
     const data = robotRigData.get(obj);
     if (!data) throw new Error(`Missing live joint data in ${robotGlbUrl}`);
-    const find = (name:RobotJointName) => data.joints.get(name)!;
-    return {
-      A1: find("A1"), A2: find("A2"), A3: find("A3"), A5: find("A5"), A6: find("A6"),
-      jawL: find("JawL"), jawR: find("JawR"), axes:data.axes,
-      rest: {
-        A1: data.restQuaternion.get("A1")!, A2: data.restQuaternion.get("A2")!,
-        A3: data.restQuaternion.get("A3")!, A5: data.restQuaternion.get("A5")!,
-        A6: data.restQuaternion.get("A6")!, jawL: data.restPosition.get("JawL")!,
-        jawR: data.restPosition.get("JawR")!,
-      },
-    };
+    return data;
   }, [obj]);
   const rotation = useMemo(() => new THREE.Quaternion(), []);
   useFrame(() => {
-    const ik = solveIK(sim.tool, sim.toolYaw,sim.rig);
-    const close = (sim.carry || sim.closed) ? GRIPPER_CLOSE_TRAVEL : 0;
-    if (rig) {
-      rotation.setFromAxisAngle(rig.axes.yaw, ik.yaw);
-      rig.A1.quaternion.copy(rig.rest.A1).multiply(rotation);
-      rotation.setFromAxisAngle(rig.axes.shoulder, ik.shoulder);
-      rig.A2.quaternion.copy(rig.rest.A2).multiply(rotation);
-      rotation.setFromAxisAngle(rig.axes.elbow, ik.elbow);
-      rig.A3.quaternion.copy(rig.rest.A3).multiply(rotation);
-      rotation.setFromAxisAngle(rig.axes.wrist, ik.wrist);
-      rig.A5.quaternion.copy(rig.rest.A5).multiply(rotation);
-      rotation.setFromAxisAngle(rig.axes.roll, ik.roll);
-      rig.A6.quaternion.copy(rig.rest.A6).multiply(rotation);
-      rig.jawL.position.copy(rig.rest.jawL).addScaledVector(rig.axes.jawL, close);
-      rig.jawR.position.copy(rig.rest.jawR).addScaledVector(rig.axes.jawR, -close);
-    }
+    if (!rig) return;
+    const ik = solveIK(sim.tool, sim.toolYaw, sim.rig);
+    const turn = (name:RobotJointName, axis:THREE.Vector3, angle:number) => {
+      rotation.setFromAxisAngle(axis, angle);
+      rig.joints.get(name)!.quaternion.copy(rig.restQuaternion.get(name)!).multiply(rotation);
+    };
+    turn("A1", rig.axes.yaw, ik.yaw);
+    turn("A2", rig.axes.shoulder, ik.shoulder);
+    turn("A3", rig.axes.elbow, ik.elbow);
+    turn("A5", rig.axes.wrist, ik.wrist);
+    turn("A6", rig.axes.roll, ik.roll);
+    // Parallel levers: both links swing together and the finger counter-rotates to stay square.
+    const { angle } = jawPose(sim.jaw);
+    for (const name of ["Lever.O.001", "Lever.O.002"] as const) turn(name, rig.axes.lever, angle);
+    for (const name of ["Lever.u.001", "Lever.u.002"] as const) turn(name, rig.axes.lever, -angle);
+    turn("Finger-oben", rig.axes.lever, -angle);
+    turn("Finger-unten", rig.axes.lever, angle);
   });
   return (
     <group position={[ROBOT_BASE.x, ROBOT_BASE.y, ROBOT_BASE.z]} scale={ROBOT_SCALE}>
-      {obj ? <group rotation-y={Math.PI / 2}><primitive object={obj} /></group> : null}
+      {obj ? <group rotation-y={ROBOT_MODEL_YAW}><primitive object={obj} /></group> : null}
     </group>
   );
 }
@@ -320,7 +298,7 @@ function PushTab({ sim }: { sim: ReturnType<typeof createSim> }) {
   return <mesh ref={ref} material={steel} castShadow><boxGeometry args={[TAB.L, TAB.H, TAB.W]} /></mesh>;
 }
 
-function Stepper({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometry: THREE.BufferGeometry }) {
+function Stepper({ sim, geometry, robot }: { sim: ReturnType<typeof createSim>; geometry: THREE.BufferGeometry; robot:THREE.Group|null }) {
   const n = useRef(0);
   const ready = useRef(false);
   useEffect(() => {
@@ -332,12 +310,12 @@ function Stepper({ sim, geometry }: { sim: ReturnType<typeof createSim>; geometr
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const debug = {
-      state: sim,
+      state: sim, robot,
       sim: (seconds: number) => { for (let i = 0; i < seconds * 60; i++) stepSim(sim, 1 / 60); },
     };
     Object.assign(window, { __growth: debug });
     return () => { Reflect.deleteProperty(window, "__growth"); };
-  }, [sim]);
+  }, [sim, robot]);
   useFrame((_, d) => {
     if (ready.current) stepSim(sim, d);
     if (ready.current && ++n.current === 3) document.querySelector("#growth")?.setAttribute("data-scene-ready", "1");
@@ -385,11 +363,11 @@ function World() {
         <Robot sim={sim} obj={obj} />
         <Bars sim={sim} geometry={lingotGeometry} />
         <PushTab sim={sim} />
-        <Stepper sim={sim} geometry={lingotGeometry} />
+        <Stepper sim={sim} geometry={lingotGeometry} robot={obj} />
       </Suspense>
 
       <OrbitControls
-        target={[0.13, 0.65, -0.28]} enableDamping dampingFactor={0.08}
+        target={[0.7, 0.75, 0.3]} enableDamping dampingFactor={0.08}
         minDistance={0.6} maxDistance={12} maxPolarAngle={Math.PI / 2 - 0.03}
         autoRotate autoRotateSpeed={0.35}
       />
